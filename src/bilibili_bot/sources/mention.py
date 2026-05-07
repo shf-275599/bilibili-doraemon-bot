@@ -39,6 +39,8 @@ class MentionMsgFeedSource(MsgFeedReplySource):
             except Exception as e:
                 logger.warning("normalize_failed", error=str(e))
 
+        if events:
+            self._enrich_bvid(events, client)
         return events
 
     def _normalize_item(self, item: dict) -> CommentEvent | None:
@@ -62,4 +64,5 @@ class MentionMsgFeedSource(MsgFeedReplySource):
             author_name=user.get("nickname", ""),
             content_text=item_data.get("source_content", ""),
             at_me=True,
+            bvid="",
         )

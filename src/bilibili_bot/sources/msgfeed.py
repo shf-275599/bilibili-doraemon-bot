@@ -39,7 +39,23 @@ class MsgFeedReplySource(BaseSource):
             except Exception as e:
                 logger.warning("normalize_failed", error=str(e))
 
+        self._enrich_bvid(events, client)
         return events
+
+    def _enrich_bvid(self, events: list[CommentEvent], client) -> None:
+        """为 video 类型的 CommentEvent 补充 bvid（aid → bvid 转换）。"""
+        for event in events:
+            if event.business_type == "video" and event.oid and not event.bvid:
+                try:
+                    resp = client.get(
+                        "https://api.bilibili.com/x/web-interface/view",
+                        params={"aid": event.oid},
+                    )
+                    data = resp.json()
+                    if data.get("code") == 0:
+                        event.bvid = data.get("data", {}).get("bvid", "")
+                except Exception as e:
+                    logger.debug("bvid_enrich_failed", oid=event.oid, error=str(e))
 
     def _normalize_item(self, item: dict) -> CommentEvent | None:
         user = item.get("user", {})
@@ -62,4 +78,5 @@ class MsgFeedReplySource(BaseSource):
             author_name=user.get("nickname", ""),
             content_text=item_data.get("source_content", ""),
             at_me=True,
+            bvid="",
         )
