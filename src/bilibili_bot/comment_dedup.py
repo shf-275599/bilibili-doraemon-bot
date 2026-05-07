@@ -50,7 +50,7 @@ class DedupService:
 
     def mark_failed(self, event: CommentEvent, reason: str, provider: str | None = None) -> None:
         record = self.store.get_record(event.event_key())
-        retries = record.get("retries", 0) if record else 0
+        retries = record.get("retries", 0) + 1 if record else 1
 
         self.store.append_processed({
             "event_key": event.event_key(),

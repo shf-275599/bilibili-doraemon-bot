@@ -37,12 +37,28 @@ class CookieHealth:
 
 
 class CookieRefreshManager:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, store=None):
         self.config = config
         self.cookies_file = config["cookie"]["cookies_file"]
         self.timeout = config["bot"].get("request_timeout_seconds", 25)
         self.check_interval_seconds = config["cookie"].get("check_interval_minutes", 30) * 60
-        self._last_check_at = 0.0
+        self.store = store
+        self._last_check_at = self._load_last_check()
+
+    def _load_last_check(self) -> float:
+        if self.store is None:
+            return 0.0
+        state = self.store.load_state()
+        return state.get("cookie_refresh", {}).get("last_check_at", 0.0)
+
+    def _save_last_check(self) -> None:
+        if self.store is None:
+            return
+        state = self.store.load_state()
+        if "cookie_refresh" not in state:
+            state["cookie_refresh"] = {}
+        state["cookie_refresh"]["last_check_at"] = self._last_check_at
+        self.store.save_state(state)
 
     def _headers(self) -> dict[str, str]:
         cookies = parse_cookies_file(self.cookies_file)
@@ -86,6 +102,7 @@ class CookieRefreshManager:
             return CookieHealth(valid=True, message=f"距离上次检查未满 {self.check_interval_seconds // 60} 分钟")
 
         self._last_check_at = now
+        self._save_last_check()
         status = self.check_health()
         if not status.valid:
             return status

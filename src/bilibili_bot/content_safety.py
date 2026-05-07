@@ -49,10 +49,11 @@ class ContentSafetyChecker:
         self._compile_patterns()
 
     def _compile_patterns(self) -> None:
-        self.sensitive_pattern = re.compile(
-            "|".join(re.escape(w) for w in self.sensitive_words),
-            re.IGNORECASE,
-        )
+        if self.sensitive_words:
+            pattern = "|".join(re.escape(w) for w in self.sensitive_words)
+        else:
+            pattern = "(?!x)x"
+        self.sensitive_pattern = re.compile(pattern, re.IGNORECASE)
         self.url_pattern = re.compile(
             r"https?://[^\s]+|www\.[^\s]+",
             re.IGNORECASE,

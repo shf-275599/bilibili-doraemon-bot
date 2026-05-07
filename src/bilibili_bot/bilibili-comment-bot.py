@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import signal
 import sys
+import threading
 import time
 
 from bot_config import DEFAULT_CONFIG_PATH, load_config, parse_cookies_file
@@ -39,7 +41,7 @@ def setup_logging(level: str) -> None:
 def run_msgfeed_once(config: dict, dry_run: bool = False) -> int:
     store = JsonlStateStore()
     dedup = DedupService(store)
-    cookie_manager = CookieRefreshManager(config)
+    cookie_manager = CookieRefreshManager(config, store)
     source_factories = []
     if config["sources"].get("msgfeed", {}).get("enabled", True):
         source_factories.append(MsgFeedReplySource(config))
@@ -70,6 +72,13 @@ def run_msgfeed_once(config: dict, dry_run: bool = False) -> int:
         LOGGER.warning("Cookie 无效，停止本轮发送，仅记录状态")
         return 0
 
+    SOURCE_CONFIG_KEYS = {
+        "MsgFeedReplySource": "msgfeed",
+        "MentionMsgFeedSource": "mention",
+        "OwnVideoCommentSource": "own_video",
+        "OwnDynamicCommentSource": "own_dynamic",
+    }
+
     LOGGER.info("开始执行一轮多来源扫描")
     events = []
     state = store.load_state()
@@ -78,8 +87,9 @@ def run_msgfeed_once(config: dict, dry_run: bool = False) -> int:
 
     for source in source_factories:
         source_name = source.__class__.__name__
+        config_key = SOURCE_CONFIG_KEYS.get(source_name, source_name.replace("Source", "").lower())
 
-        source_config = config["sources"].get(source_name.replace("Source", "").lower(), {})
+        source_config = config["sources"].get(config_key, {})
         interval = source_config.get("poll_interval_seconds", config["bot"].get("poll_interval_seconds", 30))
         last_run = source_last_run.get(source_name, 0)
         if now - last_run < interval:
@@ -302,13 +312,26 @@ def main() -> int:
 
     interval = config["bot"].get("poll_interval_seconds", 30)
     LOGGER.info("进入守护模式，轮询间隔 %s 秒", interval)
-    while True:
+
+    shutdown_event = threading.Event()
+
+    def _handle_signal(signum, frame):
+        LOGGER.info("收到信号 %s，准备优雅退出...", signum)
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+    while not shutdown_event.is_set():
         try:
             run_msgfeed_once(config, dry_run=args.dry_run)
             run_dm_once(config, dry_run=args.dry_run)
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception("守护循环异常: %s", exc)
-        time.sleep(interval)
+        shutdown_event.wait(timeout=interval)
+
+    LOGGER.info("守护循环已退出，状态已保存")
+    return 0
 
 
 if __name__ == "__main__":
