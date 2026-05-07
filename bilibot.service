@@ -1,0 +1,24 @@
+[Unit]
+Description=Bilibili 评论自动回复机器人 v2
+After=network-online.target
+Wants=network-online.target
+
+# 用户级 systemd 服务，安装在 ~/.config/systemd/user/
+# 自动启动：systemctl --user enable --now bilibot.service
+# WSL 开机自启：需要先运行 sudo loginctl enable-linger $USER
+
+[Service]
+Type=simple
+WorkingDirectory=%h/bilibili-bot
+Environment=PYTHONPATH=%h/bilibili-bot/src
+EnvironmentFile=%h/bilibili-bot/.env
+ExecStart=%h/.espressif/python_env/idf5.5_py3.12_env/bin/python3 -m bilibili_bot
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bilibot
+LimitNOFILE=4096
+
+[Install]
+WantedBy=default.target
