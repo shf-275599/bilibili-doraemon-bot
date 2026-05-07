@@ -95,9 +95,9 @@ class ReplyConfig(BaseModel):
 
 
 class RateLimitConfig(BaseModel):
-    min_request_interval_seconds: int = 3
-    reply_delay_min_seconds: int = 3
-    reply_delay_max_seconds: int = 8
+    min_request_interval_seconds: float = 1
+    reply_delay_min_seconds: float = 1
+    reply_delay_max_seconds: float = 3
     max_retries: int = 3
     backoff_base_seconds: int = 10
     circuit_breaker_failures: int = 5
