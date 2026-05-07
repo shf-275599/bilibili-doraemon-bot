@@ -71,6 +71,6 @@ def _download_audio(url: str, output: str, cookies_file: str) -> None:
         "--no-playlist",
         url,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp 失败 (code={result.returncode}): {result.stderr[:300]}")

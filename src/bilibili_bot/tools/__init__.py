@@ -20,7 +20,7 @@ WHISPER_MODEL = (
     "snapshots/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66"
 )
 
-TRANSCRIBE_COOLDOWN = 300
+TRANSCRIBE_COOLDOWN = 30
 MAX_CACHE_SIZE = 50
 
 _last_transcribe_at: float = 0
@@ -103,7 +103,7 @@ def _try_ai_summary(bvid: str) -> str:
     try:
         result = subprocess.run(
             ["python3", str(script), bvid, COOKIES_FILE],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():
             text = result.stdout.strip()

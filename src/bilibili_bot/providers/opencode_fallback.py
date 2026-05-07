@@ -30,7 +30,7 @@ class OpenCodeFallbackProvider(BaseProvider):
                 command,
                 capture_output=True,
                 text=True,
-                timeout=self.global_config.ai.timeout_seconds + 30,
+                timeout=self.global_config.ai.timeout_seconds,
             )
         except (subprocess.SubprocessError, OSError) as exc:
             return ReplyResult(False, provider=self.name, error=str(exc), retriable=True)
