@@ -8,6 +8,7 @@
 - **多来源监听** - 消息通知回复、@我消息、自己动态评论、自己视频评论、私信
 - **AI 智能回复** - 支持 OpenAI-compatible API（DeepSeek/GPT/Claude 等）+ 本地降级通道
 - **Cookie 自动刷新** - RSA-OAEP 加密 + refresh_csrf 完整链路
+- **DM 私信自动回复** - 监听私信消息，AI 生成回复并发送（含 WBI 签名）
 - **保守风控** - 随机延迟、来源熔断、全局熔断、小时/日回复上限
 - **类型安全配置** - Pydantic v2 配置验证
 - **结构化日志** - structlog JSON 格式，便于监控
@@ -79,24 +80,24 @@ tmux new-session -d -s bilibot "export DEEPSEEK_API_KEY=xxx && python -m bilibil
 
 ```toml
 [bot]
-poll_interval_seconds = 30    # 轮询间隔
+poll_interval_seconds = 5     # 主循环间隔
 log_level = "INFO"            # 日志级别
 
 [sources.msgfeed]
 enabled = true                # 启用消息通知回复监听
-poll_interval_seconds = 20    # 独立轮询间隔
+poll_interval_seconds = 8     # 独立轮询间隔
 
 [sources.mention]
 enabled = true                # 启用 @我 消息监听
 
 [sources.dm]
 enabled = true                # 启用私信自动回复
-poll_interval_seconds = 60    # 私信轮询间隔
+poll_interval_seconds = 5     # 私信轮询间隔
 max_reply_per_round = 5       # 每轮最大回复数
 skip_keywords = ["广告", "推广"]  # 跳过含关键词的私信
 
 [ai]
-primary_provider = "deepseek" # 主 AI Provider
+primary_provider = "deepseek" # 主 AI Provider（DeepSeek V4 Flash）
 fallback_provider = "opencode-local"  # 降级 Provider
 
 [reply]
@@ -105,10 +106,11 @@ temperature = 0.75            # 回复随机性（0-1）
 max_tokens = 200              # 最大 token 数
 
 [rate_limit]
+min_request_interval_seconds = 0.5  # 最小请求间隔
 max_hourly_replies = 20       # 每小时最大回复数
 max_daily_replies = 100       # 每天最大回复数
-reply_delay_min_seconds = 3   # 最小回复延迟
-reply_delay_max_seconds = 8   # 最大回复延迟
+reply_delay_min_seconds = 0.3 # 最小回复延迟
+reply_delay_max_seconds = 1.2 # 最大回复延迟
 ```
 
 ## 目录结构
@@ -183,11 +185,11 @@ bilibili-bot/
 Source.fetch() → [Event]
     ↓
 DedupStage      → 跳过已处理
-FilterStage     → 跳过自己/空/黑名单
+FilterStage     → 跳过自己/空/黑名单（DM 跳过此阶段）
 RateLimitStage  → 等待/阻塞如果超限
 GenerateStage   → 调用 AI 生成回复
 SafetyStage     → 检查回复内容安全
-SendStage       → 发送到 Bilibili API
+SendStage       → 发送到 Bilibili API（私信含 WBI 签名）
 ```
 
 ### 事件模型
@@ -224,7 +226,7 @@ class DMEvent(Event):
 
 ## 风控策略
 
-- **随机延迟** - 每条回复前随机等待 3-8 秒
+- **随机延迟** - 每条回复前随机等待 0.3-1.2 秒
 - **来源熔断** - 单来源连续失败 3 次 → 冷却 180 秒
 - **全局熔断** - 连续失败 5 次 → 冷却 600 秒
 - **小时上限** - 每小时最多 20 条回复
