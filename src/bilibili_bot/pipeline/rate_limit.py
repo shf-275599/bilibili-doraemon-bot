@@ -1,32 +1,34 @@
-#!/usr/bin/env python3
-"""基础频率控制与退避（支持跨轮持久化）。"""
-
 from __future__ import annotations
 
 import random
 import time
-from typing import TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from state_store import JsonlStateStore
+import structlog
+
+from bilibili_bot.events import Event
+from bilibili_bot.pipeline.base import PipelineStage, PipelineContext, StageResult
+from bilibili_bot.state import StateStore
+
+logger = structlog.get_logger()
 
 
 class RateController:
-    def __init__(self, config: dict, store: JsonlStateStore | None = None):
+    def __init__(self, config, store: StateStore | None = None):
         self.config = config
         self.store = store
-        cfg = config["rate_limit"]
-        self.min_request_interval = cfg.get("min_request_interval_seconds", 3)
-        self.reply_delay_min = cfg.get("reply_delay_min_seconds", 8)
-        self.reply_delay_max = cfg.get("reply_delay_max_seconds", 20)
-        self.backoff_base = cfg.get("backoff_base_seconds", 10)
-        self.circuit_breaker_failures = cfg.get("circuit_breaker_failures", 5)
-        self.circuit_breaker_cooldown = cfg.get("circuit_breaker_cooldown_seconds", 600)
-        self.source_circuit_breaker_failures = cfg.get("source_circuit_breaker_failures", 3)
-        self.max_hourly_replies = cfg.get("max_hourly_replies", 20)
-        self.max_daily_replies = cfg.get("max_daily_replies", 100)
-        self.max_replies_per_user_per_hour = cfg.get("max_replies_per_user_per_hour", 5)
-        self.max_replies_per_oid_per_hour = cfg.get("max_replies_per_oid_per_hour", 10)
+        cfg = config.rate_limit
+        self.min_request_interval = cfg.min_request_interval_seconds
+        self.reply_delay_min = cfg.reply_delay_min_seconds
+        self.reply_delay_max = cfg.reply_delay_max_seconds
+        self.backoff_base = cfg.backoff_base_seconds
+        self.circuit_breaker_failures = cfg.circuit_breaker_failures
+        self.circuit_breaker_cooldown = cfg.circuit_breaker_cooldown_seconds
+        self.source_circuit_breaker_failures = cfg.source_circuit_breaker_failures
+        self.max_hourly_replies = cfg.max_hourly_replies
+        self.max_daily_replies = cfg.max_daily_replies
+        self.max_replies_per_user_per_hour = cfg.max_replies_per_user_per_hour
+        self.max_replies_per_oid_per_hour = cfg.max_replies_per_oid_per_hour
 
         self._load_state()
 
@@ -91,11 +93,16 @@ class RateController:
     def can_send(self, user_id: str = "", oid: str = "") -> tuple[bool, str]:
         self._prune_reply_timestamps()
         now = time.time()
+
         if now < self.cooldown_until:
             return False, f"熔断冷却中，直到 {int(self.cooldown_until)}"
-        if len([ts for ts in self.reply_timestamps if now - ts < 3600]) >= self.max_hourly_replies:
+
+        hourly_count = len([ts for ts in self.reply_timestamps if now - ts < 3600])
+        if hourly_count >= self.max_hourly_replies:
             return False, "已达到每小时回复上限"
-        if len([ts for ts in self.reply_timestamps if now - ts < 86400]) >= self.max_daily_replies:
+
+        daily_count = len([ts for ts in self.reply_timestamps if now - ts < 86400])
+        if daily_count >= self.max_daily_replies:
             return False, "已达到每日回复上限"
 
         if user_id:
@@ -153,32 +160,41 @@ class RateController:
         self.source_failures[name] = count
         delay = self.backoff_base * max(1, count)
         if count >= self.source_circuit_breaker_failures:
-            cooldown = self.config["bot"].get("source_failure_cooldown_seconds", 180)
+            cooldown = self.config.bot.source_failure_cooldown_seconds
             self.source_cooldowns[name] = time.time() + cooldown
         self._save_state()
         return delay
 
-    def snapshot(self) -> dict:
-        self._prune_reply_timestamps()
-        now = time.time()
-        return {
-            "failure_count": self.failure_count,
-            "cooldown_until": int(self.cooldown_until),
-            "hourly_replies": len([ts for ts in self.reply_timestamps if now - ts < 3600]),
-            "daily_replies": len([ts for ts in self.reply_timestamps if now - ts < 86400]),
-            "source_failures": self.source_failures,
-            "source_cooldowns": {k: int(v) for k, v in self.source_cooldowns.items()},
-            "last_request_at": int(self.last_request_at),
-        }
-
     def _prune_reply_timestamps(self) -> None:
         now = time.time()
         self.reply_timestamps = [ts for ts in self.reply_timestamps if now - ts < 86400]
+
         for uid in list(self.user_reply_timestamps.keys()):
-            self.user_reply_timestamps[uid] = [ts for ts in self.user_reply_timestamps[uid] if now - ts < 86400]
+            self.user_reply_timestamps[uid] = [
+                ts for ts in self.user_reply_timestamps[uid] if now - ts < 86400
+            ]
             if not self.user_reply_timestamps[uid]:
                 del self.user_reply_timestamps[uid]
+
         for oid in list(self.oid_reply_timestamps.keys()):
-            self.oid_reply_timestamps[oid] = [ts for ts in self.oid_reply_timestamps[oid] if now - ts < 86400]
+            self.oid_reply_timestamps[oid] = [
+                ts for ts in self.oid_reply_timestamps[oid] if now - ts < 86400
+            ]
             if not self.oid_reply_timestamps[oid]:
                 del self.oid_reply_timestamps[oid]
+
+
+class RateLimitStage(PipelineStage):
+    def process(self, event: Event, context: PipelineContext) -> StageResult:
+        allowed, reason = context.rate_limiter.can_send(
+            user_id=event.author_id,
+            oid=event.target_id,
+        )
+
+        if not allowed:
+            logger.warning("rate_limit_blocked", event_key=event.event_key, reason=reason)
+            context.dedup.mark_failed(event, reason)
+            return StageResult.SKIP
+
+        context.rate_limiter.wait_for_request_slot()
+        return StageResult.CONTINUE

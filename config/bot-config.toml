@@ -74,8 +74,8 @@ mention_style = "friendly"
 
 [rate_limit]
 min_request_interval_seconds = 3
-reply_delay_min_seconds = 8
-reply_delay_max_seconds = 20
+reply_delay_min_seconds = 3
+reply_delay_max_seconds = 8
 max_retries = 3
 backoff_base_seconds = 10
 circuit_breaker_failures = 5

@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import os
+from typing import Any
+
+import requests
+
+from bilibili_bot.providers.base import BaseProvider, ReplyResult
+
+
+class OpenAICompatibleProvider(BaseProvider):
+    def generate(self, messages: list[dict[str, str]]) -> ReplyResult:
+        api_key_env = self.provider_config.get("api_key_env", "")
+        api_key = os.environ.get(api_key_env, "")
+
+        if not api_key:
+            return ReplyResult(False, provider=self.name, error=f"缺少环境变量 {api_key_env}")
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        base_url = self.provider_config.get("base_url", "").rstrip("/")
+        model = self.provider_config.get("model", "")
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": self.global_config.reply.temperature,
+            "max_tokens": self.global_config.reply.max_tokens,
+        }
+
+        try:
+            response = requests.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.global_config.ai.timeout_seconds,
+            )
+        except requests.RequestException as exc:
+            return ReplyResult(False, provider=self.name, error=str(exc), retriable=True)
+
+        retriable = response.status_code in {408, 409, 429, 500, 502, 503, 504}
+        if response.status_code != 200:
+            return ReplyResult(
+                False,
+                provider=self.name,
+                error=f"HTTP {response.status_code}: {response.text[:300]}",
+                retriable=retriable,
+            )
+
+        try:
+            data = response.json()
+            text = data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, ValueError, TypeError) as exc:
+            return ReplyResult(
+                False,
+                provider=self.name,
+                error=f"响应解析失败: {exc}",
+                retriable=False,
+                raw=response.text,
+            )
+
+        if not text:
+            return ReplyResult(
+                False,
+                provider=self.name,
+                error="Provider 返回空回复",
+                retriable=False,
+                raw=data,
+            )
+
+        return ReplyResult(True, text=text, provider=self.name, raw=data)

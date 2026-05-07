@@ -1,23 +1,15 @@
-#!/usr/bin/env python3
-"""AI 输出安全审查模块。"""
-
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 
+import structlog
 
-# 敏感词列表（可根据需要扩展）
-DEFAULT_SENSITIVE_WORDS = [
-    "共产党", "法轮功", "台独", "疆独", "藏独", "反华", "颠覆",
-    "赌博", "博彩", "色情", "淫秽", "嫖娼", "卖淫", "毒品", "吸毒",
-    "诈骗", "传销", "非法集资", "洗钱", "黑客", "木马", "病毒",
-    "微信", "QQ", "qq", "加群", "加薇", "加V", "加v",
-    "裸聊", "约炮", "包养", "代孕", "人体器官", "枪支", "弹药",
-    "爆炸物", "恐怖袭击", "自杀", "自残", "邪教", "迷信",
-]
+from bilibili_bot.events import Event
+from bilibili_bot.pipeline.base import PipelineStage, PipelineContext, StageResult
 
-# 个人信息模式
+logger = structlog.get_logger()
+
 PII_PATTERNS = [
     (r"\b1[3-9]\d{9}\b", "手机号"),
     (r"\b\d{17}[\dXx]\b", "身份证号"),
@@ -25,27 +17,20 @@ PII_PATTERNS = [
     (r"\b\d{16,19}\b", "银行卡号"),
 ]
 
-# 风险阈值
-MAX_SENSITIVE_WORDS = 0  # 出现即拦截
-MAX_PII_COUNT = 1
-MAX_URL_COUNT = 3
-MAX_LENGTH = 500
-
 
 @dataclass
 class SafetyCheckResult:
     safe: bool
     reason: str = ""
-    risk_level: str = "none"  # none, low, medium, high
+    risk_level: str = "none"
 
 
 class ContentSafetyChecker:
-    def __init__(self, config: dict | None = None):
-        cfg = config or {}
-        self.sensitive_words = cfg.get("sensitive_words", DEFAULT_SENSITIVE_WORDS)
-        self.max_length = cfg.get("max_length", MAX_LENGTH)
-        self.max_url_count = cfg.get("max_url_count", MAX_URL_COUNT)
-        self.block_pii = cfg.get("block_pii", True)
+    def __init__(self, config):
+        self.sensitive_words = config.content_safety.sensitive_words
+        self.max_length = config.content_safety.max_length
+        self.max_url_count = config.content_safety.max_url_count
+        self.block_pii = config.content_safety.block_pii
         self._compile_patterns()
 
     def _compile_patterns(self) -> None:
@@ -54,10 +39,7 @@ class ContentSafetyChecker:
         else:
             pattern = "(?!x)x"
         self.sensitive_pattern = re.compile(pattern, re.IGNORECASE)
-        self.url_pattern = re.compile(
-            r"https?://[^\s]+|www\.[^\s]+",
-            re.IGNORECASE,
-        )
+        self.url_pattern = re.compile(r"https?://[^\s]+|www\.[^\s]+", re.IGNORECASE)
 
     def check(self, text: str) -> SafetyCheckResult:
         if not text or not text.strip():
@@ -91,7 +73,7 @@ class ContentSafetyChecker:
             for pattern, pii_type in PII_PATTERNS:
                 if re.search(pattern, text):
                     pii_found.append(pii_type)
-            if len(pii_found) >= MAX_PII_COUNT:
+            if len(pii_found) >= 1:
                 return SafetyCheckResult(
                     False,
                     f"包含个人信息: {', '.join(pii_found)}",
@@ -101,5 +83,27 @@ class ContentSafetyChecker:
         return SafetyCheckResult(True, "内容安全", "none")
 
 
-def default_safety_checker() -> ContentSafetyChecker:
-    return ContentSafetyChecker()
+class SafetyCheckStage(PipelineStage):
+    def __init__(self):
+        self._checker = None
+
+    def _get_checker(self, config) -> ContentSafetyChecker:
+        if self._checker is None:
+            self._checker = ContentSafetyChecker(config)
+        return self._checker
+
+    def process(self, event: Event, context: PipelineContext) -> StageResult:
+        checker = self._get_checker(context.config)
+        check = checker.check(context.reply_text)
+
+        if not check.safe:
+            logger.error(
+                "safety_check_failed",
+                event_key=event.event_key,
+                reason=check.reason,
+                risk_level=check.risk_level,
+            )
+            context.dedup.mark_failed(event, f"内容安全审查: {check.reason}", context.provider_used)
+            return StageResult.HALT
+
+        return StageResult.CONTINUE
