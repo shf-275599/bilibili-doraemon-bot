@@ -1,0 +1,31 @@
+# Netscape HTTP Cookie File
+# 运行时 cookies 模板 — 复制为 bilibili-cookies.txt 并填入真实值
+# 此文件不应提交到 git
+
+.bilibili.com	TRUE	/	FALSE	0	buvid3	REPLACE_WITH_REAL_BUVID3
+.bilibili.com	TRUE	/	FALSE	0	b_nut	REPLACE_WITH_REAL_B_NUT
+.bilibili.com	TRUE	/	FALSE	0	_uuid	REPLACE_WITH_REAL_UUID
+.bilibili.com	TRUE	/	FALSE	0	buvid_fp	REPLACE_WITH_REAL_BUVID_FP
+.bilibili.com	TRUE	/	FALSE	0	enable_web_push	DISABLE
+.bilibili.com	TRUE	/	FALSE	0	buvid4	REPLACE_WITH_REAL_BUVID4
+.bilibili.com	TRUE	/	FALSE	0	theme-tip-show	SHOWED
+.bilibili.com	TRUE	/	FALSE	0	rpdid	REPLACE_WITH_REAL_RPDID
+.bilibili.com	TRUE	/	FALSE	0	theme-avatar-tip-show	SHOWED
+.bilibili.com	TRUE	/	FALSE	0	LIVE_BUVID	AUTO9917581013670000
+.bilibili.com	TRUE	/	FALSE	0	PVID	1
+.bilibili.com	TRUE	/	FALSE	0	theme-switch-show	SHOWED
+.bilibili.com	TRUE	/	FALSE	0	ogv_device_support_hdr	0
+.bilibili.com	TRUE	/	FALSE	0	ogv_device_support_dolby	0
+.bilibili.com	TRUE	/	FALSE	0	bili_ticket	REPLACE_WITH_REAL_BILI_TICKET
+.bilibili.com	TRUE	/	FALSE	0	bili_ticket_expires	REPLACE_WITH_REAL_EXPIRES
+.bilibili.com	TRUE	/	FALSE	0	home_feed_column	5
+.bilibili.com	TRUE	/	FALSE	0	browser_resolution	2284-1158
+.bilibili.com	TRUE	/	FALSE	0	bmg_af_switch	1
+.bilibili.com	TRUE	/	FALSE	0	bmg_src_def_domain	i2.hdslb.com
+.bilibili.com	TRUE	/	FALSE	0	bp_t_offset_REPLACE_UID	REPLACE_WITH_REAL_OFFSET
+.bilibili.com	TRUE	/	FALSE	0	CURRENT_QUALITY	0
+.bilibili.com	TRUE	/	FALSE	0	SESSDATA	REPLACE_WITH_REAL_SESSDATA
+.bilibili.com	TRUE	/	FALSE	0	bili_jct	REPLACE_WITH_REAL_BILI_JCT
+.bilibili.com	TRUE	/	FALSE	0	DedeUserID	REPLACE_WITH_REAL_UID
+.bilibili.com	TRUE	/	FALSE	0	DedeUserID__ckMd5	REPLACE_WITH_REAL_CKMD5
+.bilibili.com	TRUE	/	FALSE	0	sid	REPLACE_WITH_REAL_SID

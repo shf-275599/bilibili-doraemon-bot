@@ -1,0 +1,80 @@
+[bot]
+enabled = true
+poll_interval_seconds = 30
+run_mode = "daemon"
+conservative_mode = true
+log_level = "INFO"
+request_timeout_seconds = 25
+source_failure_cooldown_seconds = 180
+
+[sources.msgfeed]
+enabled = true
+poll_interval_seconds = 20
+page_size = 10
+
+[sources.mention]
+enabled = true
+page_size = 10
+
+[sources.own_video]
+enabled = true
+video_page_size = 5
+comment_page_size = 10
+max_retries = 2
+retry_sleep_seconds = 6
+
+[sources.own_dynamic]
+enabled = true
+dynamic_page_size = 5
+comment_page_size = 10
+
+[filters]
+skip_self = true
+skip_empty = true
+skip_pure_emoji = true
+min_meaningful_length = 2
+blacklist_mids = []
+duplicate_window_minutes = 1440
+
+[ai]
+primary_provider = "deepseek"
+fallback_provider = "opencode-local"
+timeout_seconds = 25
+max_reply_chars = 100
+
+[ai.providers.deepseek]
+type = "openai_compatible"
+base_url = "https://api.deepseek.com/v1"
+model = "deepseek-chat"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[ai.providers.opencode-local]
+type = "opencode_local"
+command = "opencode"
+dir = "."
+
+[reply]
+system_prompt = "你是一只小苏doge，一个友善、有梗、说话自然的B站UP主。回复评论时要简短（不超过80字）、接地气、偶尔带点小幽默，不要机械感，不要像客服。看到技术相关可以认真聊，看到玩梗的可以接梗，看到夸你的就谦虚一下。避免重复同样的回复。"
+temperature = 0.75
+max_tokens = 200
+prefix = ""
+mention_style = "friendly"
+
+[rate_limit]
+min_request_interval_seconds = 3
+reply_delay_min_seconds = 8
+reply_delay_max_seconds = 20
+max_retries = 3
+backoff_base_seconds = 10
+circuit_breaker_failures = 5
+circuit_breaker_cooldown_seconds = 600
+max_hourly_replies = 20
+max_daily_replies = 100
+source_circuit_breaker_failures = 3
+
+[cookie]
+cookies_file = "config/bilibili-cookies.txt"
+refresh_enabled = true
+refresh_token_env = "BILIBILI_REFRESH_TOKEN"
+check_interval_minutes = 30
+healthcheck_endpoint = "https://api.bilibili.com/x/web-interface/nav"
