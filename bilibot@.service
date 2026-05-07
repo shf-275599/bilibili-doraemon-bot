@@ -8,7 +8,7 @@ User=%I
 WorkingDirectory=/home/%I/bilibili-bot
 Environment=PYTHONUNBUFFERED=1
 Environment=BILIBILI_BOT_ROOT=/home/%I/bilibili-bot
-ExecStart=/usr/bin/python3 src/bilibili_bot/bilibili-comment-bot.py
+ExecStart=/usr/bin/python3 -m bilibili_bot
 Restart=always
 RestartSec=30
 StandardOutput=journal
