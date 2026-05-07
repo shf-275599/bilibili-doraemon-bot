@@ -13,8 +13,9 @@ from bilibili_bot.state import StateStore
 
 logger = structlog.get_logger()
 
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 RETRY_COOLDOWN_SECONDS = 300
+FATAL_COOLDOWN_SECONDS = 3600
 
 FATAL_ERROR_KEYWORDS = ["已经被删除", "已被删除", "不存在", "已关闭", "已过期"]
 
@@ -69,7 +70,10 @@ class DedupService:
 
             retries = record.get("retries", 0)
             if retries >= MAX_RETRIES:
-                return DedupStatus.FAILED_FATAL
+                last_retry = record.get("last_retry_at", 0)
+                if time.time() - last_retry < FATAL_COOLDOWN_SECONDS:
+                    return DedupStatus.FAILED_FATAL
+                return DedupStatus.NEW
 
             last_retry = record.get("last_retry_at", 0)
             if time.time() - last_retry < RETRY_COOLDOWN_SECONDS:

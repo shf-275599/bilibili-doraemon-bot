@@ -73,7 +73,10 @@ class OpenAICompatibleProvider(BaseProvider):
                     provider=self.name,
                     error="TOOL_CALLS",
                     retriable=False,
-                    raw={"tool_calls": message["tool_calls"]},
+                    raw={
+                        "tool_calls": message["tool_calls"],
+                        "full_message": message,  # 保留 reasoning_content 等字段
+                    },
                 )
 
             text = message.get("content", "").strip()
@@ -114,8 +117,17 @@ class OpenAICompatibleProvider(BaseProvider):
 
             if result.error == "TOOL_CALLS" and result.raw:
                 tool_calls = result.raw["tool_calls"]
-                choice_message = {"role": "assistant", "tool_calls": tool_calls}
-                current_messages.append(choice_message)
+                full_msg = result.raw.get("full_message", {})
+
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": full_msg.get("content"),
+                    "tool_calls": tool_calls,
+                }
+                # DeepSeek thinking mode 要求回传 reasoning_content
+                if full_msg.get("reasoning_content"):
+                    assistant_msg["reasoning_content"] = full_msg["reasoning_content"]
+                current_messages.append(assistant_msg)
 
                 for tc in tool_calls:
                     fn_name = tc["function"]["name"]
