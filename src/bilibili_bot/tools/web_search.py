@@ -44,6 +44,8 @@ def _tavily_search(query: str, num: int, api_key: str) -> str:
         if resp.status_code != 200:
             return ""
 
+        _increment_quota()
+
         results = data.get("results", [])
         if not results:
             return ""
@@ -103,8 +105,11 @@ def _increment_quota() -> None:
     if current["month"] != month:
         current = {"month": month, "count": 0}
     current["count"] += 1
+
     QUOTA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    QUOTA_FILE.write_text(json.dumps(current), encoding="utf-8")
+    tmp_path = QUOTA_FILE.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(current), encoding="utf-8")
+    tmp_path.replace(QUOTA_FILE)
 
 
 def _read_quota() -> dict:
