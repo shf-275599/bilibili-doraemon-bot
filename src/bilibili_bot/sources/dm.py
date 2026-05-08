@@ -182,6 +182,6 @@ def _build_recent_history(messages: list, my_uid: str) -> list[dict]:
         if text.strip():
             recent.append({
                 "role": "bot" if sender == my_uid else "user",
-                "content": text,
+                "content": text[:200],
             })
     return recent

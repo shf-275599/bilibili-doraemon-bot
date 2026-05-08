@@ -87,7 +87,7 @@ class OwnVideoCommentSource(BaseSource):
         thread_context = ""
         parent_reply = reply.get("parent_reply")
         if parent_reply and isinstance(parent_reply, dict):
-            parent_content = parent_reply.get("content", {}).get("message", "")
+            parent_content = parent_reply.get("content", {}).get("message", "")[:200]
             parent_name = parent_reply.get("member", {}).get("uname", "")
             thread_context = f"→ 回复 {parent_name}：{parent_content}"
 
