@@ -18,7 +18,7 @@ def send_comment_reply(event: CommentEvent, reply_text: str, client) -> tuple[bo
     params = {
         "type": COMMENT_TYPE_MAP.get(event.business_type, 1),
         "oid": event.oid,
-        "root": event.root_rpid,
+        "root": event.root_rpid if event.root_rpid and event.root_rpid != "0" else event.rpid,
         "parent": event.rpid,
         "message": reply_text,
         "csrf": csrf,
