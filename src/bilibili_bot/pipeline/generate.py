@@ -32,11 +32,7 @@ def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
     parts.append(f"评论作者：{event.author_name}")
     parts.append(f"评论内容：{event.content_text}")
     parts.append("")
-    parts.append(
-        f"请直接生成一条适合在B站公开回复的中文回复。要求：自然、友好、简洁，"
-        f"不超过 {config.ai.max_reply_chars} 个汉字，不要解释自己，"
-        f"不要输出多版本，不要加引号。"
-    )
+    parts.append("请直接生成一条适合在B站公开回复的中文回复。")
 
     return [
         {"role": "system", "content": config.reply.system_prompt},
