@@ -171,16 +171,39 @@ def _build_recent_history(messages: list, my_uid: str) -> tuple[list[dict], str 
         if not isinstance(msg, dict):
             continue
         sender = str(msg.get("sender_uid", 0))
+        msg_type = msg.get("msg_type", 0)
         content_str = msg.get("content", "{}")
-        try:
-            import json
-            content_data = json.loads(content_str)
-            if isinstance(content_data, dict):
-                text = content_data.get("content", "")
-            else:
-                text = str(content_data)
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            text = str(content_str)
+
+        if msg_type == 7:
+            # B站视频/动态分享：提取 title + bvid 注入上下文
+            try:
+                import json as _json
+                share_data = _json.loads(content_str)
+                if isinstance(share_data, dict):
+                    bvid = share_data.get("bvid", "")
+                    title = share_data.get("title", "")
+                    author_name = share_data.get("author", "")
+                    if bvid and title:
+                        text = f"[分享了视频：《{title}》({bvid})，UP主：{author_name}]" if author_name else f"[分享了视频：《{title}》({bvid})]"
+                    elif bvid:
+                        text = f"[分享了视频 {bvid}]"
+                    else:
+                        text = "[分享了视频]"
+                else:
+                    text = "[分享了视频]"
+            except Exception:
+                text = "[分享了视频]"
+        else:
+            try:
+                import json as _json2
+                content_data = _json2.loads(content_str)
+                if isinstance(content_data, dict):
+                    text = content_data.get("content", "")
+                else:
+                    text = str(content_data)
+            except Exception:
+                text = str(content_str)
+
         if text.strip():
             recent.append({
                 "role": "bot" if sender == my_uid else "user",
