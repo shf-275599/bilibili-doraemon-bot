@@ -8,6 +8,21 @@ from bilibili_bot.pipeline.base import PipelineStage, PipelineContext, StageResu
 logger = structlog.get_logger()
 
 
+def summarize_conversation(summary_text: str, provider) -> str:
+    """调用 LLM 生成对话摘要，失败时返回空字符串。"""
+    try:
+        messages = [
+            {"role": "system", "content": "你是一个对话摘要助手。用一句中文简洁总结以下对话的内容和当前话题。"},
+            {"role": "user", "content": f"对话历史:\n{summary_text}"},
+        ]
+        result = provider.generate(messages)
+        if result.success and result.text:
+            return result.text[:100]
+    except Exception as e:
+        logger.warning("summarize_failed", error=str(e))
+    return ""
+
+
 def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
     business_labels = {"video": "视频", "dynamic": "动态", "dynamic_draw": "图文动态"}
     business_label = business_labels.get(event.business_type, event.business_type)
@@ -45,6 +60,9 @@ def build_dm_messages(event: DMEvent, config) -> list[dict[str, str]]:
         {"role": "system", "content": config.reply.system_prompt},
     ]
 
+    if event.conversation_summary:
+        messages.append({"role": "system", "content": f"对话背景摘要：{event.conversation_summary}"})
+
     if event.recent_messages:
         for hist in event.recent_messages[-10:]:
             messages.append({"role": "user" if hist["role"] == "user" else "assistant", "content": hist["content"]})
@@ -62,6 +80,10 @@ class AIGenerateStage(PipelineStage):
         if isinstance(event, CommentEvent):
             messages = build_comment_messages(event, context.config)
         elif isinstance(event, DMEvent):
+            if event.conversation_summary and len(event.recent_messages) > 15:
+                event.conversation_summary = summarize_conversation(
+                    event.conversation_summary, context.providers.primary
+                )
             messages = build_dm_messages(event, context.config)
         else:
             logger.error("unknown_event_type", event_type=type(event).__name__)

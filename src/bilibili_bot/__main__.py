@@ -1,35 +1,101 @@
 """Bilibili 评论自动回复机器人 v2 入口。"""
 
+import argparse
+import json as json_lib
 import signal
 import sys
 import threading
-
-from bilibili_bot.config import BotConfig
-from bilibili_bot.log import setup_logging
-from bilibili_bot.client import BilibiliSession
-from bilibili_bot.state import StateStore
-from bilibili_bot.pipeline.dedup import DedupService
-from bilibili_bot.pipeline.rate_limit import RateController
-from bilibili_bot.providers.manager import ProviderManager
-from bilibili_bot.cookie import CookieRefreshManager
-from bilibili_bot.sources.msgfeed import MsgFeedReplySource
-from bilibili_bot.sources.mention import MentionMsgFeedSource
-from bilibili_bot.sources.own_video import OwnVideoCommentSource
-from bilibili_bot.sources.own_dynamic import OwnDynamicCommentSource
-from bilibili_bot.sources.dm import DMSource
-from bilibili_bot.pipeline.base import Pipeline, PipelineContext
-from bilibili_bot.pipeline.dedup import DedupStage
-from bilibili_bot.pipeline.filter import FilterStage
-from bilibili_bot.pipeline.rate_limit import RateLimitStage
-from bilibili_bot.pipeline.generate import AIGenerateStage
-from bilibili_bot.pipeline.safety import SafetyCheckStage
-from bilibili_bot.pipeline.send import SendStage
-
-import argparse
 import time
+import uuid
+from datetime import datetime, timedelta, timezone
+
 import structlog
 
+from bilibili_bot.auto_skip import AutoSkipTracker
+from bilibili_bot.client import BilibiliSession
+from bilibili_bot.config import BotConfig
+from bilibili_bot.cookie import CookieRefreshManager
+from bilibili_bot.feedback import check_reply_quality, get_quality_summary, save_feedback
+from bilibili_bot.log import setup_logging
+from bilibili_bot.pipeline.base import Pipeline, PipelineContext
+from bilibili_bot.pipeline.dedup import DedupService, DedupStage
+from bilibili_bot.pipeline.filter import FilterStage
+from bilibili_bot.pipeline.generate import AIGenerateStage
+from bilibili_bot.pipeline.rate_limit import RateController, RateLimitStage
+from bilibili_bot.pipeline.safety import SafetyCheckStage
+from bilibili_bot.pipeline.send import SendStage
+from bilibili_bot.providers.manager import ProviderManager
+from bilibili_bot.sources.dm import DMSource
+from bilibili_bot.sources.mention import MentionMsgFeedSource
+from bilibili_bot.sources.msgfeed import MsgFeedReplySource
+from bilibili_bot.sources.own_dynamic import OwnDynamicCommentSource
+from bilibili_bot.sources.own_video import OwnVideoCommentSource
+from bilibili_bot.state import StateStore
+
 logger = structlog.get_logger()
+
+CST = timezone(timedelta(hours=8))
+
+
+def _send_report_dm(config: BotConfig, report_text: str) -> bool:
+    client = BilibiliSession(config.cookie.cookies_file, config.bot.request_timeout_seconds)
+    csrf = client.get_cookies().get("bili_jct", "")
+    sender_uid = client.get_cookies().get("DedeUserID", "")
+    receiver_id = config.bot.report_owner_uid
+
+    data = {
+        "msg[sender_uid]": sender_uid,
+        "msg[receiver_id]": receiver_id,
+        "msg[receiver_type]": 1,
+        "msg[msg_type]": 1,
+        "msg[msg_status]": 0,
+        "msg[content]": json_lib.dumps({"content": report_text}),
+        "msg[dev_id]": str(uuid.uuid4()),
+        "msg[new_face_version]": 0,
+        "msg[timestamp]": int(time.time()),
+        "from_firework": 0,
+        "build": 0,
+        "mobi_app": "web",
+        "csrf_token": csrf,
+        "csrf": csrf,
+    }
+
+    query_params = client.sign_wbi({
+        "w_sender_uid": sender_uid,
+        "w_receiver_id": receiver_id,
+    })
+
+    resp = client.post(
+        "https://api.vc.bilibili.com/web_im/v1/web_im/send_msg",
+        params=query_params,
+        data=data,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    return result.get("code") == 0
+
+
+def _maybe_send_daily_report(config: BotConfig) -> None:
+    from bilibili_bot.stats import generate_daily_report
+
+    now = datetime.now(CST)
+    today_str = now.strftime("%Y-%m-%d")
+
+    if now.hour != config.bot.report_hour:
+        return
+
+    store = StateStore()
+    state = store.load_state()
+
+    if state.get("last_report_date") == today_str:
+        return
+
+    report_text = generate_daily_report(store)
+
+    if _send_report_dm(config, report_text):
+        logger.info("daily_report_sent")
+        state["last_report_date"] = today_str
+        store.save_state(state)
 
 
 def create_comment_pipeline() -> Pipeline:
@@ -60,6 +126,7 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
     rate_limiter = RateController(config, store)
     providers = ProviderManager(config)
     cookie_manager = CookieRefreshManager(config, store)
+    auto_skip_tracker = AutoSkipTracker(store)
 
     cookie_status = cookie_manager.maybe_refresh()
     logger.info("cookie_health", valid=cookie_status.valid, message=cookie_status.message)
@@ -74,6 +141,7 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
         providers=providers,
         rate_limiter=rate_limiter,
         dry_run=dry_run,
+        auto_skip=auto_skip_tracker,
     )
 
     comment_pipeline = create_comment_pipeline()
@@ -150,6 +218,23 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
             delay = rate_limiter.record_source_failure(source_name)
             logger.error("source_failed", source=source_name, error=str(e), retry_delay=delay)
 
+    feedback_check_interval = 6 * 3600
+    last_feedback_check = state.get("last_feedback_check", 0)
+    if now - last_feedback_check >= feedback_check_interval:
+        try:
+            feedback_results = check_reply_quality(client, store)
+            if feedback_results:
+                save_feedback(store, feedback_results)
+            summary = get_quality_summary(store)
+            state["last_feedback_check"] = int(now)
+            logger.info(
+                "feedback_check_done",
+                checked=len(feedback_results),
+                summary=summary,
+            )
+        except Exception as e:
+            logger.error("feedback_check_failed", error=str(e))
+
     state["source_last_run"] = source_last_run
     store.save_state(state)
 
@@ -184,6 +269,12 @@ def main() -> int:
             run_once(config, dry_run=args.dry_run)
         except Exception as e:
             logger.error("daemon_error", error=str(e))
+
+        if config.bot.report_enabled:
+            try:
+                _maybe_send_daily_report(config)
+            except Exception as e:
+                logger.error("daily_report_error", error=str(e))
 
         shutdown_event.wait(timeout=config.bot.poll_interval_seconds)
 

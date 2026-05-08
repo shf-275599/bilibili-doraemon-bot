@@ -95,6 +95,7 @@ class DMEvent(Event):
     msg_type: int = 1
     msg_key: int = 0
     recent_messages: list = field(default_factory=list)
+    conversation_summary: str = ""
 
     @property
     def author_id(self) -> str:
@@ -117,5 +118,6 @@ class DMEvent(Event):
             "msg_type": self.msg_type,
             "msg_key": self.msg_key,
             "recent_count": len(self.recent_messages),
+            "conversation_summary": self.conversation_summary,
         })
         return data

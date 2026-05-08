@@ -55,7 +55,7 @@ class DMSource(BaseSource):
                 messages = [m for m in messages if isinstance(m, dict)]
                 logger.debug("dm_messages_fetched", talker_id=talker_id, count=len(messages))
 
-                recent = _build_recent_history(messages, my_uid)
+                recent, summary = _build_recent_history(messages, my_uid)
 
                 for msg in messages:
                     sender_uid = msg.get("sender_uid", 0)
@@ -71,6 +71,7 @@ class DMSource(BaseSource):
                         continue
 
                     event.recent_messages = recent
+                    event.conversation_summary = summary or ""
 
                     logger.info(
                         "dm_event_found",
@@ -163,7 +164,8 @@ class DMSource(BaseSource):
         return False
 
 
-def _build_recent_history(messages: list, my_uid: str) -> list[dict]:
+def _build_recent_history(messages: list, my_uid: str) -> tuple[list[dict], str | None]:
+    """返回 (recent, summary_text)。超过 20 条时 summary_text 包含最老 15 条的格式化文本。"""
     recent = []
     for msg in reversed(messages):
         if not isinstance(msg, dict):
@@ -184,4 +186,15 @@ def _build_recent_history(messages: list, my_uid: str) -> list[dict]:
                 "role": "bot" if sender == my_uid else "user",
                 "content": text[:200],
             })
-    return recent
+
+    summary_text = None
+    if len(recent) > 20:
+        # recent[-15:] = 最老的 15 条（因 reversed 遍历，末尾即最老）
+        oldest_15 = recent[-15:]
+        lines = []
+        for item in oldest_15:
+            role_label = "我" if item["role"] == "bot" else "对方"
+            lines.append(f"{role_label}: {item['content']}")
+        summary_text = "\n".join(lines)
+
+    return recent, summary_text

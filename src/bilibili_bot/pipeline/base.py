@@ -24,6 +24,7 @@ class PipelineContext:
     dry_run: bool = False
     reply_text: str = ""
     provider_used: str = ""
+    auto_skip: Any = None
 
 
 class PipelineStage(ABC):

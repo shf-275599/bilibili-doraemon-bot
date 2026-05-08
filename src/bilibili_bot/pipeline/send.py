@@ -121,5 +121,7 @@ class SendStage(PipelineStage):
             logger.error("send_failed", event_key=event.event_key, error=message)
             context.dedup.mark_failed(event, message, context.provider_used)
             context.rate_limiter.record_failure(retriable)
+            if not retriable and isinstance(event, CommentEvent) and context.auto_skip:
+                context.auto_skip.record_fatal(event.event_key, event.author_mid, event.source_type)
 
         return StageResult.CONTINUE

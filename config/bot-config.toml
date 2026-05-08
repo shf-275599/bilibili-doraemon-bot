@@ -6,6 +6,9 @@ conservative_mode = true
 log_level = "INFO"
 request_timeout_seconds = 25
 source_failure_cooldown_seconds = 180
+report_enabled = true
+report_owner_uid = "3706984385742849"
+report_hour = 22
 
 [sources.msgfeed]
 enabled = true
