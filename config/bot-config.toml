@@ -61,7 +61,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 [reply]
 system_prompt_file = "config/system-prompt.txt"
-temperature = 0.75
+temperature = 0.5
 max_tokens = 800
 prefix = ""
 mention_style = "friendly"
