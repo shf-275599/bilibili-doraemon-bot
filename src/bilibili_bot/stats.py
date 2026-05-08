@@ -21,6 +21,8 @@ def generate_daily_report(store) -> str:
     video_summary_count = 0
     search_count = 0
     error_count = 0
+    source_counts: dict[str, int] = {}
+    total_reply_chars = 0
 
     if store.reply_history_path.exists():
         with store.reply_history_path.open("r", encoding="utf-8") as f:
@@ -39,6 +41,7 @@ def generate_daily_report(store) -> str:
 
                 event = record.get("event", {})
                 source_type = event.get("source_type", "")
+                source_counts[source_type] = source_counts.get(source_type, 0) + 1
 
                 if source_type == "dm":
                     dm_count += 1
@@ -47,6 +50,8 @@ def generate_daily_report(store) -> str:
 
                 reply_text = record.get("reply_text", "")
                 provider_used = record.get("provider_used", "")
+
+                total_reply_chars += len(reply_text)
 
                 if _is_video_summary(reply_text, provider_used):
                     video_summary_count += 1
@@ -57,15 +62,50 @@ def generate_daily_report(store) -> str:
                 if _is_error(reply_text, provider_used):
                     error_count += 1
 
+    total_replies = comment_count + dm_count
     quota_used, quota_total = _read_search_quota(store)
+    api_estimate = _estimate_api_calls(total_replies, video_summary_count, search_count)
+    token_estimate = _estimate_tokens(total_replies, total_reply_chars)
+    source_health_line = _source_health(store)
 
-    return (
-        f"📊 今日报告\n"
-        f"处理评论: {comment_count} 条 | 私信: {dm_count} 条\n"
-        f"工具调用: 视频总结 {video_summary_count} 次、搜索 {search_count} 次\n"
-        f"剩余搜索配额: {quota_total - quota_used}/{quota_total}\n"
-        f"错误: {error_count} 次"
-    )
+    lines = [
+        f"📊 今日报告",
+        f"─" * 20,
+        f"评论回复: {comment_count} 条 | 私信: {dm_count} 条 | 总计: {total_replies} 条",
+        f"工具调用: 视频总结 {video_summary_count} 次 | 搜索 {search_count} 次",
+    ]
+
+    if source_counts:
+        source_detail = "  ".join(f"{k}:{v}" for k, v in sorted(source_counts.items()))
+        lines.append(f"来源分布: {source_detail}")
+
+    lines.extend([
+        f"─",
+        f"API 调用估算: ~{api_estimate} 次",
+        f"Token 估算: ~{token_estimate}",
+        f"搜索配额: {quota_used}/{quota_total}（{quota_total - quota_used} 剩余）",
+        f"错误: {error_count} 次",
+    ])
+
+    source_health_line = _source_health(store)
+    if source_health_line:
+        lines.append(f"─")
+        lines.append(source_health_line)
+
+    return "\n".join(lines)
+
+
+def _estimate_api_calls(total_replies: int, video_summaries: int, searches: int) -> int:
+    return total_replies + video_summaries + searches
+
+
+def _estimate_tokens(total_replies: int, total_chars: int) -> str:
+    reply_tokens = total_replies * 200
+    prompt_tokens = total_replies * 800
+    total = reply_tokens + prompt_tokens
+    if total >= 10000:
+        return f"{total / 1000:.1f}k"
+    return str(total)
 
 
 def _is_video_summary(reply_text: str, provider_used: str) -> bool:
@@ -81,6 +121,20 @@ def _is_search_call(reply_text: str, provider_used: str) -> bool:
 def _is_error(reply_text: str, provider_used: str) -> bool:
     error_markers = ["错误", "失败", "异常", "出错", "暂时不可用", "稍后再试"]
     return any(marker in reply_text for marker in error_markers)
+
+
+def _source_health(store) -> str:
+    state = store.load_state()
+    sc = state.get("rate_limit", {}).get("source_cooldowns", {})
+    now = time.time()
+    problems = []
+    for name, until in sc.items():
+        if until > now:
+            remaining = int(until - now)
+            problems.append(f"{name} 冷却中({remaining}s)")
+    if problems:
+        return "⚠️ " + " ".join(problems)
+    return ""
 
 
 def _read_search_quota(store) -> tuple[int, int]:

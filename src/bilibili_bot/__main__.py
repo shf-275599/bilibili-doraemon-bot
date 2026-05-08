@@ -236,6 +236,20 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
             logger.error("feedback_check_failed", error=str(e))
 
     state["source_last_run"] = source_last_run
+
+    compact_interval = 86400
+    last_compact = state.get("last_compact_check", 0)
+    if now - last_compact >= compact_interval:
+        try:
+            file_size = store.processed_path.stat().st_size if store.processed_path.exists() else 0
+            entry_count = len(store._processed_index)
+            if file_size > 10_000_000 or entry_count > 5000:
+                freed = store.compact_processed()
+                logger.info("processed_compacted", freed_bytes=freed, entries_before=entry_count)
+        except Exception as e:
+            pass
+        state["last_compact_check"] = int(now)
+
     store.save_state(state)
 
 

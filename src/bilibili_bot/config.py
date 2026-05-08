@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import tomllib
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -93,9 +93,21 @@ class AIConfig(BaseModel):
 
 
 class ReplyConfig(BaseModel):
+    system_prompt_file: str = ""
     system_prompt: str = "你是一只小苏doge，一个友善、有梗、说话自然的B站UP主。回复评论时要简短（不超过80字）、接地气、偶尔带点小幽默，不要机械感，不要像客服。看到技术相关可以认真聊，看到玩梗的可以接梗，看到夸你的就谦虚一下。避免重复同样的回复。"
     temperature: float = 0.75
     max_tokens: int = 200
+
+    @model_validator(mode="after")
+    def load_prompt_from_file(self) -> ReplyConfig:
+        if self.system_prompt_file:
+            try:
+                file_path = Path(self.system_prompt_file)
+                if file_path.exists():
+                    self.system_prompt = file_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        return self
 
 
 class RateLimitConfig(BaseModel):
