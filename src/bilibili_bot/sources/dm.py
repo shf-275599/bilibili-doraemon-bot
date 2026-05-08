@@ -210,10 +210,11 @@ def _build_recent_history(messages: list, my_uid: str) -> tuple[list[dict], str 
                 "content": text[:200],
             })
 
+    recent.reverse()  # 转为正序（最老在前），LLM 按时间顺序理解
+
     summary_text = None
     if len(recent) > 20:
-        # recent[-15:] = 最老的 15 条（因 reversed 遍历，末尾即最老）
-        oldest_15 = recent[-15:]
+        oldest_15 = recent[:15]  # 取最老的 15 条（正序后前 15 条即最老）
         lines = []
         for item in oldest_15:
             role_label = "我" if item["role"] == "bot" else "对方"
