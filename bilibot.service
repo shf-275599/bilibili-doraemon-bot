@@ -12,7 +12,7 @@ Type=simple
 WorkingDirectory=%h/bilibili-bot
 Environment=PYTHONPATH=%h/bilibili-bot/src
 EnvironmentFile=%h/bilibili-bot/.env
-ExecStart=%h/.espressif/python_env/idf5.5_py3.12_env/bin/python3 -m bilibili_bot
+ExecStart=%h/bilibili-bot/.venv/bin/python3 -m bilibili_bot
 Restart=always
 RestartSec=30
 StandardOutput=journal

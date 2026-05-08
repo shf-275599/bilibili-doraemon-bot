@@ -61,7 +61,7 @@ def transcribe_video(bvid: str, model_path: str, cookies_file: str) -> str:
 
 def _download_audio(url: str, output: str, cookies_file: str) -> None:
     cmd = [
-        "/home/shf/.espressif/python_env/idf5.5_py3.12_env/bin/yt-dlp",
+        "yt-dlp",
         "--cookies", cookies_file,
         "--extract-audio",
         "--audio-format", "wav",
