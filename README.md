@@ -1,61 +1,65 @@
 # Bilibili 评论自动回复机器人 v2
 
-自动监听 Bilibili 评论和私信，使用 AI 生成回复并发送的后台守护进程。
+自动监听 Bilibili 评论和私信，使用 DeepSeek V4 Flash 生成 AI 回复的后台守护进程。
 
 ## 功能特性
 
-- **Pipeline 管道架构** - 模块化处理流程，易于扩展
+- **Pipeline 管道架构** - 模块化处理流程（dedup → filter → rate_limit → generate → safety → send）
 - **多来源监听** - 消息通知回复、@我消息、自己动态评论、自己视频评论、私信
-- **AI 智能回复** - 支持 OpenAI-compatible API（DeepSeek/GPT/Claude 等）+ 本地降级通道
+- **AI 智能回复** - DeepSeek V4 Flash，支持 Function Calling（Tool Calling）
+- **上下文富化** - 自动携带视频标题、父评论内容、私信对话历史、BV号
+- **视频内容工具** - 用户 @bot 可获取视频 AI 摘要，不可用时自动降级为 Whisper 语音转录
 - **Cookie 自动刷新** - RSA-OAEP 加密 + refresh_csrf 完整链路
-- **DM 私信自动回复** - 监听私信消息，AI 生成回复并发送（含 WBI 签名）
+- **DM 私信回复** - 监听私信，AI 生成回复并发送（含 WBI 签名）
 - **保守风控** - 随机延迟、来源熔断、全局熔断、小时/日回复上限
 - **类型安全配置** - Pydantic v2 配置验证
 - **结构化日志** - structlog JSON 格式，便于监控
-- **单元测试** - 20+ 测试用例，保证代码质量
 
 ## 快速开始
 
 ### 1. 安装依赖
 
 ```bash
-pip install -r requirements.txt
-
-# 或使用 pyproject.toml（推荐）
 pip install -e .
 ```
 
 ### 2. 配置
 
 ```bash
-# 复制配置模板
-cp .env.example .env
-cp config/bilibili-cookies.example.txt config/bilibili-cookies.txt
-
 # 编辑配置文件
-nano .env                          # 填入 API Key 和 Refresh Token
-nano config/bilibili-cookies.txt   # 填入真实 Cookies
-nano config/bot-config.toml        # 调整机器人配置
+nano .env                              # 填入 DEEPSEEK_API_KEY
+nano config/bilibili-cookies.txt       # 填入真实 Cookies
+nano config/bot-config.toml            # 调整机器人配置
 ```
 
 ### 3. 测试运行
 
 ```bash
-# 执行一轮 dry-run（生成回复但不发送）
+# dry-run（生成回复但不发送）
 python -m bilibili_bot --once --dry-run
 
-# 执行一轮真实自动回复
+# 单轮真实运行
 python -m bilibili_bot --once
 ```
 
 ### 4. 启动守护模式
 
 ```bash
-# 前台运行
-python -m bilibili_bot
+# systemd（推荐，开机自启）
+systemctl --user enable --now bilibot
 
-# 后台运行（推荐使用 tmux）
-tmux new-session -d -s bilibot "export DEEPSEEK_API_KEY=xxx && python -m bilibili_bot"
+# 手动启动
+systemctl --user start bilibot
+
+# 查看日志
+journalctl --user -u bilibot -f
+```
+
+### 5. 开机自启
+
+```bash
+# 允许用户服务在系统启动时自动运行（需要一次 sudo）
+sudo loginctl enable-linger $USER
 ```
 
 ## 配置说明
@@ -64,114 +68,96 @@ tmux new-session -d -s bilibot "export DEEPSEEK_API_KEY=xxx && python -m bilibil
 
 | 变量 | 说明 | 必需 |
 |------|------|------|
-| `DEEPSEEK_API_KEY` | DeepSeek API Key（主 AI Provider） | 是 |
-| `BILIBILI_REFRESH_TOKEN` | Bilibili Refresh Token（Cookie 自动刷新） | 否 |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key | 是 |
+| `BILIBILI_REFRESH_TOKEN` | Cookie 自动刷新 Token | 否 |
 
-### 获取 Refresh Token
-
-1. 用浏览器登录 [https://www.bilibili.com](https://www.bilibili.com)
-2. 按 F12 打开开发者工具
-3. 切换到 **Application** → **Local Storage** → `https://www.bilibili.com`
-4. 查找 `ac_time_value` 键，复制其值
-
-### 配置文件
-
-编辑 `config/bot-config.toml`：
+### 主要配置
 
 ```toml
 [bot]
 poll_interval_seconds = 5     # 主循环间隔
-log_level = "INFO"            # 日志级别
 
 [sources.msgfeed]
-enabled = true                # 启用消息通知回复监听
-poll_interval_seconds = 8     # 独立轮询间隔
+enabled = true                # 消息通知回复
+poll_interval_seconds = 8
 
 [sources.mention]
-enabled = true                # 启用 @我 消息监听
+enabled = true                # @我 消息
 
 [sources.dm]
-enabled = true                # 启用私信自动回复
-poll_interval_seconds = 5     # 私信轮询间隔
-max_reply_per_round = 5       # 每轮最大回复数
-skip_keywords = ["广告", "推广"]  # 跳过含关键词的私信
+enabled = true                # 私信自动回复
+poll_interval_seconds = 5
 
 [ai]
-primary_provider = "deepseek" # 主 AI Provider（DeepSeek V4 Flash）
-fallback_provider = "opencode-local"  # 降级 Provider
+primary_provider = "deepseek" # DeepSeek V4 Flash
+tools_enabled = true           # 启用 Function Calling
+tool_max_iterations = 3       # 工具调用最大轮次
 
-[reply]
-system_prompt = "你是一只小苏doge，一个友善、有梗、说话自然的B站UP主..."
-temperature = 0.75            # 回复随机性（0-1）
-max_tokens = 200              # 最大 token 数
+[ai.providers.deepseek]
+type = "openai_compatible"
+base_url = "https://api.deepseek.com/v1"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
 
 [rate_limit]
-min_request_interval_seconds = 0.5  # 最小请求间隔
-max_hourly_replies = 20       # 每小时最大回复数
-max_daily_replies = 100       # 每天最大回复数
-reply_delay_min_seconds = 0.3 # 最小回复延迟
-reply_delay_max_seconds = 1.2 # 最大回复延迟
+min_request_interval_seconds = 0.5
+reply_delay_min_seconds = 0.3
+reply_delay_max_seconds = 1.2
+max_hourly_replies = 20
+max_daily_replies = 100
 ```
+
+## 用户使用方式
+
+**视频总结**：在任何 B站视频评论区 @bot 账号，发送 "总结一下" 或 "这视频讲了什么"。
+
+Bot 自动调用 `get_video_content` 工具：
+1. 先尝试 B站 AI 摘要（2-10s）
+2. 不可用时自动降级为 Whisper 语音转录（30-90s）
+3. 转录结果缓存，同一视频不重复转录
 
 ## 目录结构
 
 ```
 bilibili-bot/
-├── src/bilibili_bot/          # 源代码（标准 Python 包）
-│   ├── __init__.py
-│   ├── __main__.py           # 入口（python -m bilibili_bot）
-│   ├── config.py             # Pydantic 配置模型
-│   ├── client.py             # 统一 HTTP 客户端
-│   ├── events.py             # 事件模型（CommentEvent/DMEvent）
-│   ├── wbi.py                # WBI 签名
+├── src/bilibili_bot/          # 源代码
+│   ├── __main__.py           # 入口
+│   ├── config.py             # Pydantic 配置
+│   ├── client.py             # HTTP 客户端（WBI 签名）
+│   ├── events.py             # 事件模型
 │   ├── state.py              # 状态存储（带文件锁）
 │   ├── cookie.py             # Cookie 刷新管理
-│   ├── log.py                # 结构化日志
 │   ├── pipeline/             # 处理管道
 │   │   ├── base.py           # PipelineStage ABC
-│   │   ├── dedup.py          # 去重阶段
-│   │   ├── filter.py         # 过滤阶段
-│   │   ├── rate_limit.py     # 频控阶段
-│   │   ├── generate.py       # AI 生成阶段
-│   │   ├── safety.py         # 安全审查阶段
-│   │   └── send.py           # 发送阶段
+│   │   ├── dedup.py          # 去重
+│   │   ├── filter.py         # 过滤
+│   │   ├── rate_limit.py     # 频控 + 熔断
+│   │   ├── generate.py       # AI 生成（含 Tool Calling）
+│   │   ├── safety.py         # 内容安全审查
+│   │   └── send.py           # 发送（含 DM WBI 签名）
 │   ├── providers/            # AI Provider
 │   │   ├── base.py           # Provider ABC
-│   │   ├── openai_compat.py  # OpenAI 兼容
-│   │   ├── opencode_fallback.py  # 本地降级
-│   │   └── manager.py        # Provider 管理器
+│   │   ├── openai_compat.py  # OpenAI 兼容（含 tool calling）
+│   │   └── manager.py        # Provider 管理
+│   ├── tools/                # LLM Function Calling 工具
+│   │   ├── __init__.py       # 工具定义 + 执行（摘要/转录/搜索）
+│   │   ├── transcribe.py     # Whisper 语音转录
+│   │   └── web_search.py     # 联网搜索
 │   └── sources/              # 数据来源
 │       ├── base.py           # Source ABC
-│       ├── msgfeed.py        # 消息通知
-│       ├── mention.py        # @我消息
+│       ├── msgfeed.py        # 消息通知 + bvid 补充
+│       ├── mention.py        # @我消息 + bvid 补充
 │       ├── own_video.py      # 自己视频评论
 │       ├── own_dynamic.py    # 自己动态评论
 │       └── dm.py             # 私信
-├── tests/                    # 单元测试
-│   ├── test_config.py
-│   ├── test_events.py
-│   ├── test_dedup.py
-│   ├── test_filter.py
-│   ├── test_safety.py
-│   ├── test_state.py
-│   └── test_wbi.py
-├── cli/                      # CLI 工具
-│   └── wbi_tool.py           # WBI 签名工具
+├── scripts/                  # 辅助脚本
+│   └── bilibili_wbi.py       # WBI 签名 + AI 摘要
+├── models/whisper/           # Whisper 模型（gitignored）
 ├── config/                   # 配置文件
-│   ├── bot-config.toml       # 机器人配置
-│   ├── bilibili-cookies.txt  # Cookies（gitignored）
-│   └── bilibili-cookies.example.txt
 ├── data/                     # 运行时数据（gitignored）
-│   ├── bot-state.json        # 运行状态
-│   ├── processed.jsonl       # 去重记录
-│   └── reply-history.jsonl   # 回复历史
-├── docs/                     # 文档
-│   └── design.md             # 设计文档
-├── pyproject.toml            # 项目配置
-├── requirements.txt          # 依赖
-├── bilibot@.service          # systemd 服务
-├── .env.example              # 环境变量模板
-├── .gitignore
+├── tests/                    # 单元测试
+├── bilibot.service           # systemd 服务文件
+├── pyproject.toml
 └── README.md
 ```
 
@@ -179,124 +165,77 @@ bilibili-bot/
 
 ### Pipeline 管道
 
-所有事件（评论/私信）通过统一的处理管道：
-
 ```
 Source.fetch() → [Event]
     ↓
-DedupStage      → 跳过已处理
+DedupStage      → 跳过已处理（冷却 5 分钟后重试，致命错误 1 小时后过期）
 FilterStage     → 跳过自己/空/黑名单（DM 跳过此阶段）
-RateLimitStage  → 等待/阻塞如果超限
-GenerateStage   → 调用 AI 生成回复
-SafetyStage     → 检查回复内容安全
-SendStage       → 发送到 Bilibili API（私信含 WBI 签名）
+RateLimitStage  → 频控检查 + 等待
+GenerateStage   → DeepSeek 生成回复（含 Tool Calling）
+SafetyStage     → 敏感词/PII/链接/长度四重检查
+SendStage       → 发送到 Bilibili API（评论 + 私信 WBI 签名）
+```
+
+### Tool Calling 流程
+
+```
+用户评论 "总结一下这个视频"
+    ↓
+GenerateStage → 构建 prompt（含 bvid）
+    ↓
+DeepSeek API（带 tools 定义）
+    ├─ 无需工具 → 直接生成回复
+    └─ tool_calls: get_video_content(bvid)
+         ├─ AI 摘要可用 → 返回摘要 → 生成回复
+         └─ AI 摘要不可用 → Whisper 转录降级 → 生成回复
 ```
 
 ### 事件模型
 
 ```python
 @dataclass
-class Event:
-    source_type: str      # "msgfeed" | "mention" | "own_video" | "own_dynamic" | "dm"
-    event_key: str        # 去重键
-    created_at: int       # 时间戳
-
-@dataclass
 class CommentEvent(Event):
-    business_type: str    # "video" | "dynamic" | "dynamic_draw"
-    oid: str              # 内容 ID
-    rpid: str             # 评论 ID
-    author_mid: str       # 评论者 UID
-    content_text: str     # 评论内容
+    business_type: str      # "video" | "dynamic" | "dynamic_draw"
+    oid: str                # 内容 ID
+    bvid: str               # BV号（自动 aid→bvid 转换）
+    rpid: str               # 评论 ID
+    author_mid: str         # 评论者 UID
+    author_name: str        # 评论者昵称
+    content_text: str       # 评论内容
+    video_title: str        # 视频/动态标题（自动注入）
+    parent_content: str     # 父评论内容（楼中楼上下文）
+    at_me: bool             # 是否 @了 bot
 
 @dataclass
 class DMEvent(Event):
-    talker_id: int        # 发送者 UID
-    dm_content: str       # 私信内容
-    msg_key: int          # 消息 ID
+    talker_id: int          # 对话对方 UID
+    talker_name: str        # 对方昵称
+    dm_content: str         # 私信内容
+    recent_messages: list   # 最近对话历史（5条）
 ```
-
-## CLI 参数
-
-| 参数 | 说明 |
-|------|------|
-| `--config PATH` | 指定配置文件路径（默认 `config/bot-config.toml`） |
-| `--once` | 只执行一轮，不进入守护模式 |
-| `--dry-run` | 只生成回复，不实际发送 |
 
 ## 风控策略
 
-- **随机延迟** - 每条回复前随机等待 0.3-1.2 秒
-- **来源熔断** - 单来源连续失败 3 次 → 冷却 180 秒
-- **全局熔断** - 连续失败 5 次 → 冷却 600 秒
-- **小时上限** - 每小时最多 20 条回复
-- **日上限** - 每天最多 100 条回复
-- **用户限频** - 每用户每小时最多 5 条
-- **内容限频** - 每内容每小时最多 10 条
+- **随机延迟** - 每条回复前等待 0.3-1.2s
+- **来源熔断** - 单源连续失败 3 次 → 冷却 180s
+- **全局熔断** - 连续失败 5 次 → 冷却 600s
+- **去重冷却** - 失败重试最多 5 次，冷却 5 分钟，致命错误 1 小时后过期
+- **小时上限** - 每小时最多 20 条
+- **日上限** - 每天最多 100 条
+- **转录冷却** - 两次语音转录间隔 30s
 
-## 自定义 AI Provider
-
-在 `config/bot-config.toml` 中添加新的 Provider：
-
-```toml
-[ai.providers.openai]
-type = "openai_compatible"
-base_url = "https://api.openai.com/v1"
-model = "gpt-4"
-api_key_env = "OPENAI_API_KEY"
-
-[ai.providers.claude]
-type = "openai_compatible"
-base_url = "https://api.anthropic.com/v1"
-model = "claude-3-sonnet-20240229"
-api_key_env = "ANTHROPIC_API_KEY"
-```
-
-然后修改 `primary_provider` 或 `fallback_provider` 为新 Provider 名称。
-
-## 运行测试
+## 管理命令
 
 ```bash
-# 安装开发依赖
-pip install -e ".[dev]"
+# systemd（推荐）
+systemctl --user status bilibot     # 状态
+systemctl --user restart bilibot    # 重启
+journalctl --user -u bilibot -f     # 实时日志
 
-# 运行测试
-pytest tests/ -v
-
-# 运行测试并生成覆盖率报告
-pytest tests/ --cov=src/bilibili_bot --cov-report=html
+# 单轮测试
+python -m bilibili_bot --once --dry-run
+python -m bilibili_bot --once
 ```
-
-## 常见问题
-
-### Cookie 失效怎么办？
-
-机器人会自动检测 Cookie 失效并停止发送。如果配置了 `BILIBILI_REFRESH_TOKEN`，会自动刷新。否则需要手动更新 `config/bilibili-cookies.txt`。
-
-### 如何查看日志？
-
-```bash
-# 前台运行时直接看输出（JSON 格式）
-# 后台运行时查看 tmux 会话
-tmux attach -t bilibot
-```
-
-### 如何停止机器人？
-
-```bash
-# 如果是前台运行，按 Ctrl+C（优雅退出）
-# 如果是 tmux 后台运行
-tmux send-keys -t bilibot C-c  # 优雅退出
-# 或
-tmux kill-session -t bilibot   # 强制退出
-```
-
-## 从 v1 迁移
-
-1. 配置格式不变（`config/bot-config.toml`）
-2. 数据文件格式可能变化，建议备份 `data/` 目录
-3. 启动命令改为 `python -m bilibili_bot`
-4. 查看 `docs/design.md` 了解完整架构变更
 
 ## 许可证
 
