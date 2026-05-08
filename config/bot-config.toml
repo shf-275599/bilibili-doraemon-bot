@@ -35,7 +35,6 @@ comment_page_size = 10
 enabled = true
 poll_interval_seconds = 5
 max_reply_per_round = 5
-skip_keywords = ["广告", "推广", "加微信"]
 whitelist_mids = []
 
 [filters]

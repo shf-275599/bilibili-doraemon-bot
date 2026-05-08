@@ -12,7 +12,6 @@ class DMSource(BaseSource):
     def __init__(self, config):
         self.config = config
         self.max_reply_per_round = config.sources.dm.max_reply_per_round
-        self.skip_keywords = config.sources.dm.skip_keywords
         self.whitelist_mids = config.sources.dm.whitelist_mids
 
     def fetch(self) -> list[Event]:
@@ -64,10 +63,6 @@ class DMSource(BaseSource):
 
                     event = self._normalize_message(msg, session, my_uid)
                     if event is None:
-                        continue
-
-                    if self._should_skip(event):
-                        logger.debug("dm_skip_keyword", event_key=event.event_key)
                         continue
 
                     event.recent_messages = recent
@@ -156,12 +151,6 @@ class DMSource(BaseSource):
             msg_type=msg_type,
             msg_key=msg.get("msg_key", 0),
         )
-
-    def _should_skip(self, event: DMEvent) -> bool:
-        for keyword in self.skip_keywords:
-            if keyword in event.content:
-                return True
-        return False
 
 
 def _build_recent_history(messages: list, my_uid: str) -> tuple[list[dict], str | None]:

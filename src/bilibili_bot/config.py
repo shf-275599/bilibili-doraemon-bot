@@ -54,7 +54,6 @@ class DMConfig(BaseModel):
     enabled: bool = True
     poll_interval_seconds: int = 60
     max_reply_per_round: int = 5
-    skip_keywords: list[str] = Field(default_factory=lambda: ["广告", "推广", "加微信"])
     whitelist_mids: list[int] = Field(default_factory=list)
 
 
