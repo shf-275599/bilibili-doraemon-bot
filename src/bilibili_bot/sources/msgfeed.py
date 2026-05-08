@@ -71,6 +71,31 @@ class MsgFeedReplySource(BaseSource):
                     event.bvid = info.get("bvid", "")
                 if need_title:
                     event.video_title = info.get("title", "")
+                if not event.video_desc and info.get("desc"):
+                    event.video_desc = info["desc"][:200]
+
+        self._enrich_users(events, client)
+
+    def _enrich_users(self, events: list[CommentEvent], client) -> None:
+        mids = {e.author_mid for e in events if e.author_mid and not e.author_follower}
+        if not mids:
+            return
+        for mid in mids:
+            try:
+                params = client.sign_wbi({"mid": mid})
+                resp = client.get(
+                    "https://api.bilibili.com/x/space/wbi/acc/info",
+                    params=params,
+                )
+                data = resp.json()
+                if data.get("code") == 0:
+                    info = data.get("data", {})
+                    is_followed = info.get("relation", {}).get("is_followed", 0)
+                    for e in events:
+                        if e.author_mid == mid and is_followed:
+                            e.author_follower = True
+            except Exception as e:
+                logger.debug("user_enrich_failed", mid=mid, error=str(e))
 
     def _normalize_item(self, item: dict) -> CommentEvent | None:
         user = item.get("user", {})

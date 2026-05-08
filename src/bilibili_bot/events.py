@@ -49,6 +49,9 @@ class CommentEvent(Event):
     video_title: str = ""
     parent_content: str = ""
     bvid: str = ""
+    video_desc: str = ""
+    thread_context: str = ""
+    author_follower: bool = False
 
     @property
     def author_id(self) -> str:
@@ -77,6 +80,9 @@ class CommentEvent(Event):
             "video_title": self.video_title,
             "parent_content": self.parent_content,
             "bvid": self.bvid,
+            "video_desc": self.video_desc,
+            "thread_context": self.thread_context,
+            "author_follower": self.author_follower,
         })
         return data
 

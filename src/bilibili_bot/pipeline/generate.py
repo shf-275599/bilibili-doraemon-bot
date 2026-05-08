@@ -18,6 +18,12 @@ def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
         parts.append(f"内容标题：{event.video_title}")
     if event.bvid:
         parts.append(f"视频BV号：{event.bvid}")
+    if event.video_desc:
+        parts.append(f"视频简介：{event.video_desc}")
+    if event.thread_context:
+        parts.append(f"对话上下文：{event.thread_context}")
+    if event.author_follower:
+        parts.append("注：对方是你的粉丝")
 
     if event.parent_content:
         parts.append(f"被回复的评论：{event.parent_content}")

@@ -100,9 +100,12 @@ class OwnDynamicCommentSource(BaseSource):
             dynamic_desc = desc.get("text", "")
 
         parent_content = ""
+        thread_context = ""
         parent_reply = reply.get("parent_reply")
         if parent_reply and isinstance(parent_reply, dict):
             parent_content = parent_reply.get("content", {}).get("message", "")
+            parent_name = parent_reply.get("member", {}).get("uname", "")
+            thread_context = f"→ 回复 {parent_name}：{parent_content}"
 
         return CommentEvent(
             source_type="own_dynamic",
@@ -120,4 +123,5 @@ class OwnDynamicCommentSource(BaseSource):
             at_me=False,
             video_title=video_title or dynamic_desc,
             parent_content=parent_content,
+            thread_context=thread_context,
         )
