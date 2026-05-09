@@ -165,6 +165,6 @@ def _search_web(query: str) -> str:
         except Exception:
             pass
 
-        return web_search(query, monthly_limit=limit)
+        return web_search(query, daily_limit=limit)
     except ImportError:
         return "搜索功能不可用"
