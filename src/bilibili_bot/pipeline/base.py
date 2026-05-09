@@ -25,6 +25,7 @@ class PipelineContext:
     reply_text: str = ""
     provider_used: str = ""
     auto_skip: Any = None
+    store: Any = None
 
 
 class PipelineStage(ABC):

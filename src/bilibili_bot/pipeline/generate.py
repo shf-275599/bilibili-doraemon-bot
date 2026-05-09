@@ -44,6 +44,32 @@ def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
     if event.author_follower:
         parts.append("注：对方是你的粉丝")
 
+    if event.author_level > 0:
+        parts.append(f"用户等级：Lv{event.author_level}")
+    if event.author_fans_count > 0:
+        parts.append(f"粉丝数：{event.author_fans_count}")
+    if event.interaction_count > 0:
+        parts.append(f"历史互动次数：{event.interaction_count}")
+
+    if event.video_view_count > 0:
+        parts.append(f"视频播放量：{event.video_view_count}")
+    if event.video_like_count > 0:
+        parts.append(f"视频点赞数：{event.video_like_count}")
+    if event.video_favorite_count > 0:
+        parts.append(f"视频收藏数：{event.video_favorite_count}")
+    if event.up_name:
+        parts.append(f"UP主：{event.up_name}")
+    if event.up_fans_count > 0:
+        parts.append(f"UP主粉丝数：{event.up_fans_count}")
+
+    if event.conversation_summary:
+        parts.append(f"对话背景摘要：{event.conversation_summary}")
+    if event.recent_replies:
+        parts.append("历史对话：")
+        for hist in event.recent_replies[-5:]:
+            role_label = "我" if hist["role"] == "bot" else "对方"
+            parts.append(f"  {role_label}：{hist['content'][:100]}")
+
     if event.parent_content:
         parts.append(f"被回复的评论：{event.parent_content}")
 

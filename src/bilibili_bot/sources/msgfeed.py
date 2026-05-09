@@ -73,11 +73,22 @@ class MsgFeedReplySource(BaseSource):
                     event.video_title = info.get("title", "")
                 if not event.video_desc and info.get("desc"):
                     event.video_desc = info["desc"][:200]
+                
+                stat = info.get("stat", {})
+                event.video_view_count = stat.get("view", 0)
+                event.video_like_count = stat.get("like", 0)
+                event.video_coin_count = stat.get("coin", 0)
+                event.video_favorite_count = stat.get("favorite", 0)
+                event.video_share_count = stat.get("share", 0)
+                event.video_reply_count = stat.get("reply", 0)
+                
+                owner = info.get("owner", {})
+                event.up_name = owner.get("name", "")
 
         self._enrich_users(events, client)
 
     def _enrich_users(self, events: list[CommentEvent], client) -> None:
-        mids = {e.author_mid for e in events if e.author_mid and not e.author_follower}
+        mids = {e.author_mid for e in events if e.author_mid}
         if not mids:
             return
         for mid in mids:
@@ -91,9 +102,14 @@ class MsgFeedReplySource(BaseSource):
                 if data.get("code") == 0:
                     info = data.get("data", {})
                     is_followed = info.get("relation", {}).get("is_followed", 0)
+                    level = info.get("level", 0)
+                    fans_count = info.get("follower", 0)
                     for e in events:
-                        if e.author_mid == mid and is_followed:
-                            e.author_follower = True
+                        if e.author_mid == mid:
+                            if is_followed:
+                                e.author_follower = True
+                            e.author_level = level
+                            e.author_fans_count = fans_count
             except Exception as e:
                 logger.debug("user_enrich_failed", mid=mid, error=str(e))
 

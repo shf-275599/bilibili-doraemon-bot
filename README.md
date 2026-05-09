@@ -7,7 +7,7 @@
 - **Pipeline 管道架构** - 模块化处理流程（dedup → filter → rate_limit → generate → safety → send）
 - **多来源监听** - 消息通知回复、@我消息、自己动态评论、自己视频评论、私信
 - **AI 智能回复** - DeepSeek V4 Flash，支持 Function Calling（Tool Calling）
-- **上下文富化** - 自动携带视频标题、父评论内容、私信对话历史、BV号
+- **上下文富化** - 自动携带视频标题、父评论内容、私信对话历史、BV号、用户画像、视频热度
 - **视频内容工具** - 用户 @bot 可获取视频 AI 摘要，不可用时自动降级为 Whisper 语音转录
 - **联网搜索** - Tavily 优先（月度配额），自动降级到 DuckDuckGo
 - **Cookie 自动刷新** - RSA-OAEP 加密 + refresh_csrf 完整链路
@@ -19,6 +19,7 @@
 - **每日统计报告** - 定时向主人推送当日回复/工具调用/错误统计
 - **自动跳过** - 同一用户反复触发 fatal 错误时自动屏蔽，节省 API 调用
 - **多轮对话记忆** - 私信超 20 条时自动总结对话背景，保持上下文连贯
+- **评论连续对话** - 追踪同一用户在同一视频下的连续对话，保持回复连贯性
 - **回复质量反馈** - 定期检查自己回复的点赞/回复数，追踪回复效果
 
 ## 快速开始
@@ -259,10 +260,12 @@ Bot 自动调用 `get_video_content` 工具：
 |------|------|------|-----------|------|
 | `processed.jsonl` | JSONL | 事件去重记录。每条处理过的事件（成功/失败/跳过）都记一行 | ❌ **删了会丢失去重状态**，已回复过的评论可能被重复回复 | Bot 每天自动检查：文件 >10MB 或 >5000 条时自动 compact 去重。也可手动 `StateStore().compact_processed()` |
 | `reply-history.jsonl` | JSONL | 回复历史（仅成功回复，用于审计） | ✅ 可以删除，只影响历史追溯 | 保留最近 10000 条，自动裁剪 |
-| `bot-state.json` | JSON | 运行时状态：`rate_limit`（频控计数/熔断状态）、`source_last_run`（各来源上次运行时间戳）、`cookie_health`（Cookie 健康状态） | ❌ **删了会丢失频控状态**，可能短时间大量回复 | 可手动改 `cooldown_until=0` 解除熔断 |
+| `bot-state.json` | JSON | 运行时状态：`rate_limit`（频控计数/熔断状态）、`source_last_run`（各来源上次运行时间戳）、`cookie_health`（Cookie 健康状态）、`comment_contexts`（评论连续对话历史） | ❌ **删了会丢失频控状态和对话历史**，可能短时间大量回复 | 可手动改 `cooldown_until=0` 解除熔断 |
 | `search_quota.json` | JSON | Tavily 搜索月度配额 `{"month":"2026-05","count":12}` | ✅ 可以删除或把 count 改为 0 重置配额 | 月初自动重置 |
+| `feedback.jsonl` | JSONL | 回复质量反馈数据（点赞数、回复数） | ✅ 可以删除，只影响质量统计 | 每 6 小时检查一次，保留最近 7 天数据 |
 
 > 上下文富化用的数据（视频标题、父评论、私信历史）**不存储在任何文件中**，每次从 B站 API 实时获取，用完即弃。
+> **例外**：评论连续对话历史（`comment_contexts`）会持久化到 `bot-state.json`，用于追踪同一用户在同一视频下的连续对话。
 
 ## 目录结构
 
@@ -357,6 +360,25 @@ class CommentEvent(Event):
     video_title: str        # 视频/动态标题（自动注入）
     parent_content: str     # 父评论内容（楼中楼上下文）
     at_me: bool             # 是否 @了 bot
+    
+    # 用户画像扩展
+    author_level: int = 0   # 用户等级 (0-6)
+    author_fans_count: int = 0  # 粉丝数
+    interaction_count: int = 0  # 历史互动次数
+    
+    # 视频热度扩展
+    video_view_count: int = 0   # 播放量
+    video_like_count: int = 0   # 点赞数
+    video_coin_count: int = 0   # 投币数
+    video_favorite_count: int = 0  # 收藏数
+    video_share_count: int = 0  # 分享数
+    video_reply_count: int = 0  # 评论数
+    up_name: str = ""       # UP主名称
+    up_fans_count: int = 0  # UP主粉丝数
+    
+    # 连续对话扩展
+    recent_replies: list = field(default_factory=list)  # 历史回复
+    conversation_summary: str = ""  # 对话摘要
 
 @dataclass
 class DMEvent(Event):
@@ -374,18 +396,38 @@ Bot 在生成 AI 回复前，会从 B站 API 实时获取额外信息注入 prom
 
 ```
 [发给 DeepSeek 的 prompt]
+当前时间：2026年05月09日 19:30
 来源：视频
 内容标题：DeepSeek V4 发布，OpenAI 慌了        ← 从 /x/web-interface/view 实时拉
 视频BV号：BV1xx411c7mD                        ← aid 自动转换
 视频简介：梁文峰在知乎上透露...（200字截断）     ← 仅 msgfeed/mention 源
 对话上下文：→ 回复 老王：这比V3强在哪           ← 仅 own_video/dynamic 源（楼中楼）
 注：对方是你的粉丝                              ← 从 /x/space/wbi/acc/info 查
+用户等级：Lv6                                  ← 从 /x/space/wbi/acc/info 查
+粉丝数：1234                                   ← 从 /x/space/wbi/acc/info 查
+历史互动次数：5                                 ← 从 bot-state.json 的 comment_contexts 统计
+视频播放量：100000                              ← 从 /x/web-interface/view 获取
+视频点赞数：5000                                ← 从 /x/web-interface/view 获取
+视频收藏数：2000                                ← 从 /x/web-interface/view 获取
+UP主：测试UP主                                 ← 从 /x/web-interface/view 获取
+UP主粉丝数：50000                              ← 从 /x/space/wbi/acc/info 查
+对话背景摘要：用户之前问过好                     ← 从 bot-state.json 的 comment_contexts 获取
+历史对话：                                      ← 从 bot-state.json 的 comment_contexts 获取
+  对方：你好
+  我：你好呀！
 被回复的评论：开源真香（200字截断）               ← 楼中楼父评论
+是否@我：是
 评论作者：小王同学
 评论内容：总结一下这个视频
 
 请直接生成回复。
 ```
+
+**上下文来源**：
+- `video_title` / `bvid` / `video_desc` / `video_view_count` / `video_like_count` / `video_favorite_count` / `up_name` → `MsgFeedReplySource._enrich_events()` 调用 `/x/web-interface/view`
+- `parent_content` / `thread_context` → 来源 API 返回的 `parent_reply` 字段
+- `author_follower` / `author_level` / `author_fans_count` → `MsgFeedReplySource._enrich_users()` 调用 `/x/space/wbi/acc/info`
+- `interaction_count` / `recent_replies` / `conversation_summary` → 从 `bot-state.json` 的 `comment_contexts` 获取
 
 #### 私信场景
 

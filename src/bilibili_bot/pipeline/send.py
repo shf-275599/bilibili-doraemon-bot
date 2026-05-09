@@ -103,6 +103,23 @@ class SendStage(PipelineStage):
             logger.info("dry_run", event_key=event.event_key, reply=context.reply_text[:50])
             context.dedup.mark_replied(event, context.reply_text, f"{context.provider_used}:dry-run")
             context.rate_limiter.record_success(user_id=event.author_id, oid=event.target_id)
+            
+            if isinstance(event, CommentEvent) and hasattr(context, 'store') and context.store:
+                context.store.update_comment_context(
+                    video_id=event.oid,
+                    user_id=event.author_mid,
+                    user_name=event.author_name,
+                    role="user",
+                    content=event.content_text,
+                )
+                context.store.update_comment_context(
+                    video_id=event.oid,
+                    user_id=event.author_mid,
+                    user_name=event.author_name,
+                    role="bot",
+                    content=context.reply_text,
+                )
+            
             return StageResult.CONTINUE
 
         if isinstance(event, CommentEvent):
@@ -117,6 +134,22 @@ class SendStage(PipelineStage):
             logger.info("send_success", event_key=event.event_key)
             context.dedup.mark_replied(event, context.reply_text, context.provider_used)
             context.rate_limiter.record_success(user_id=event.author_id, oid=event.target_id)
+            
+            if isinstance(event, CommentEvent) and hasattr(context, 'store') and context.store:
+                context.store.update_comment_context(
+                    video_id=event.oid,
+                    user_id=event.author_mid,
+                    user_name=event.author_name,
+                    role="user",
+                    content=event.content_text,
+                )
+                context.store.update_comment_context(
+                    video_id=event.oid,
+                    user_id=event.author_mid,
+                    user_name=event.author_name,
+                    role="bot",
+                    content=context.reply_text,
+                )
         else:
             logger.error("send_failed", event_key=event.event_key, error=message)
             context.dedup.mark_failed(event, message, context.provider_used)
