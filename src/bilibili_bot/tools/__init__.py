@@ -1,14 +1,13 @@
-"""Bilibili Bot 工具系统 —— LLM Function Calling 工具定义与执行。"""
+"""Bilibili Bot 工具系统 —— smolagents @tool 工具定义。"""
 
 from __future__ import annotations
 
 import subprocess
-import json
 import time
 from pathlib import Path
-from typing import Any
 
 import structlog
+from smolagents import tool
 
 logger = structlog.get_logger()
 
@@ -26,56 +25,26 @@ MAX_CACHE_SIZE = 50
 _last_transcribe_at: float = 0
 _transcript_cache: dict[str, str] = {}
 
-TOOL_DEFINITIONS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_video_content",
-            "description": (
-                "获取B站视频的内容总结。先尝试AI摘要，不可用时自动降级为语音转录。"
-                "当用户询问'这个视频讲了什么'、'视频内容'或需要了解视频时调用。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "bvid": {"type": "string", "description": "视频的BV号，如 BV1xx411c7mD"}
-                },
-                "required": ["bvid"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_web",
-            "description": (
-                "搜索互联网获取信息。当用户询问实时新闻、特定知识点、"
-                "或需要查找资料时调用。返回搜索结果摘要。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "搜索关键词，用中文或英文"}
-                },
-                "required": ["query"],
-            },
-        },
-    },
-]
+
+@tool
+def get_video_content(bvid: str) -> str:
+    """获取B站视频的内容总结。先尝试AI摘要，不可用时自动降级为语音转录。
+    当用户询问'这个视频讲了什么'、'视频内容'或需要了解视频时调用。
+
+    Args:
+        bvid: 视频的BV号，如 BV1xx411c7mD
+    """
+    return _get_video_content(bvid)
 
 
-def execute_tool(name: str, arguments: dict[str, Any]) -> str:
-    """执行工具并返回结果字符串。"""
-    try:
-        if name == "get_video_content":
-            return _get_video_content(arguments.get("bvid", ""))
-        elif name == "search_web":
-            return _search_web(arguments.get("query", ""))
-        else:
-            return f"错误：未知工具 {name}"
-    except Exception as e:
-        logger.warning("tool_execution_failed", tool=name, error=str(e))
-        return f"工具执行失败: {e}"
+@tool
+def search_web(query: str) -> str:
+    """搜索互联网获取信息。当用户询问实时新闻、特定知识点、或需要查找资料时调用。
+
+    Args:
+        query: 搜索关键词，用中文或英文
+    """
+    return _search_web(query)
 
 
 def _get_video_content(bvid: str) -> str:

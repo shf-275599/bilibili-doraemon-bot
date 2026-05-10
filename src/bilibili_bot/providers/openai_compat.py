@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 import os
-from typing import Any, Callable
+from typing import Any
 
 import requests
 import structlog
@@ -102,61 +101,3 @@ class OpenAICompatibleProvider(BaseProvider):
             )
 
         return ReplyResult(True, text=text, provider=self.name, raw=data)
-
-    def generate_with_tools(
-        self,
-        messages: list[dict[str, str]],
-        tools: list[dict[str, Any]],
-        tool_executor: Callable[[str, dict[str, Any]], str],
-        max_iterations: int = 3,
-    ) -> ReplyResult:
-        current_messages = list(messages)
-        called_tools: set[str] = set()
-
-        for _ in range(max_iterations):
-            result = self._call_api(current_messages, tools=tools)
-
-            if result.success:
-                result.tool_calls = list(called_tools)
-                return result
-
-            if result.error == "TOOL_CALLS" and result.raw:
-                tool_calls = result.raw["tool_calls"]
-                full_msg = result.raw.get("full_message", {})
-
-                assistant_msg: dict[str, Any] = {
-                    "role": "assistant",
-                    "content": full_msg.get("content"),
-                    "tool_calls": tool_calls,
-                }
-                # DeepSeek thinking mode 要求回传 reasoning_content
-                if full_msg.get("reasoning_content"):
-                    assistant_msg["reasoning_content"] = full_msg["reasoning_content"]
-                current_messages.append(assistant_msg)
-
-                for tc in tool_calls:
-                    fn_name = tc["function"]["name"]
-                    called_tools.add(fn_name)
-                    try:
-                        fn_args = json.loads(tc["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        fn_args = {}
-                    logger.info("tool_call_start", tool=fn_name, args=fn_args)
-                    tool_result = tool_executor(fn_name, fn_args)
-                    logger.info("tool_call_end", tool=fn_name, result_preview=tool_result[:200] if tool_result else "")
-                    current_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": tool_result,
-                    })
-                continue
-
-            error_msg = result.error
-            return result
-
-        return ReplyResult(
-            False,
-            provider=self.name,
-            error=f"Tool calling 超过最大迭代次数 ({max_iterations})",
-            retriable=False,
-        )

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
+
 import structlog
 from datetime import datetime, timedelta, timezone
+from smolagents import LiteLLMModel, ToolCallingAgent
 
-from bilibili_bot.events import Event, CommentEvent, DMEvent
-from bilibili_bot.pipeline.base import PipelineStage, PipelineContext, StageResult
+from bilibili_bot.events import CommentEvent, DMEvent, Event
+from bilibili_bot.pipeline.base import PipelineContext, PipelineStage, StageResult
+from bilibili_bot.providers.base import ReplyResult
+from bilibili_bot.tools import get_video_content, search_web
 
 CST = timezone(timedelta(hours=8))
 
@@ -107,6 +112,19 @@ def build_dm_messages(event: DMEvent, config) -> list[dict[str, str]]:
 
 
 class AIGenerateStage(PipelineStage):
+    def __init__(self):
+        model = LiteLLMModel(
+            model_id="openai/deepseek-v4-flash",
+            api_base="https://api.deepseek.com/v1",
+            api_key=os.environ["DEEPSEEK_API_KEY"],
+        )
+        self._agent = ToolCallingAgent(
+            tools=[get_video_content, search_web],
+            model=model,
+            max_steps=3,
+        )
+        self._model = model
+
     def process(self, event: Event, context: PipelineContext) -> StageResult:
         if isinstance(event, CommentEvent):
             messages = build_comment_messages(event, context.config)
@@ -120,7 +138,11 @@ class AIGenerateStage(PipelineStage):
             logger.error("unknown_event_type", event_type=type(event).__name__)
             return StageResult.SKIP
 
-        reply = _generate_reply_with_tools(context, messages)
+        if context.config.ai.tools_enabled:
+            self._agent.max_steps = context.config.ai.tool_max_iterations
+            reply = self._generate_with_agent(messages, context)
+        else:
+            reply = context.providers.generate_reply(messages)
 
         if not reply.success:
             logger.error("generate_failed", event_key=event.event_key, error=reply.error)
@@ -133,23 +155,24 @@ class AIGenerateStage(PipelineStage):
         context.tool_calls = reply.tool_calls
         return StageResult.CONTINUE
 
+    def _generate_with_agent(self, messages: list[dict], context) -> ReplyResult:
+        system_prompt = context.config.reply.system_prompt
+        user_msg = messages[-1]["content"] if messages else ""
 
-def _generate_reply_with_tools(context, messages):
-    """尝试带 tool calling 的生成，失败则降级为普通生成。"""
-    from bilibili_bot.providers.openai_compat import OpenAICompatibleProvider
-    from bilibili_bot.tools import TOOL_DEFINITIONS, execute_tool
-
-    primary = context.providers.primary
-
-    if isinstance(primary, OpenAICompatibleProvider) and context.config.ai.tools_enabled:
         try:
-            return primary.generate_with_tools(
-                messages,
-                TOOL_DEFINITIONS,
-                execute_tool,
-                max_iterations=context.config.ai.tool_max_iterations,
-            )
-        except Exception as e:
-            logger.warning("tools_generation_failed", error=str(e))
+            self._agent.system_prompt = system_prompt
+            result = self._agent.run(user_msg)
+            text = str(result).strip() if result else ""
+            if not text:
+                return ReplyResult(False, provider="smolagents", error="Agent returned empty response")
 
-    return context.providers.generate_reply(messages)
+            called_tools: list[str] = []
+            for step in getattr(self._agent, "logs", []):
+                name = getattr(step, "tool_name", "")
+                if name:
+                    called_tools.append(name)
+
+            return ReplyResult(True, text=text, provider="smolagents", tool_calls=called_tools)
+        except Exception as e:
+            logger.warning("smolagents_run_failed", error=str(e))
+            return context.providers.generate_reply(messages)
