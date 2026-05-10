@@ -177,14 +177,14 @@ class StateStore:
             "timestamp": int(time.time()),
         })
         
-        if len(context["recent_replies"]) > 20:
+        if len(context["recent_replies"]) > 30:
             oldest_15 = context["recent_replies"][:15]
             lines = []
             for item in oldest_15:
                 role_label = "我" if item["role"] == "bot" else "对方"
                 lines.append(f"{role_label}: {item['content']}")
             context["conversation_summary"] = "\n".join(lines)
-            context["recent_replies"] = context["recent_replies"][-10:]
+            context["recent_replies"] = context["recent_replies"][-15:]
         
         context["last_active_at"] = int(time.time())
         state["comment_contexts"][key] = context

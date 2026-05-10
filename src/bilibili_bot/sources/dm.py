@@ -100,7 +100,7 @@ class DMSource(BaseSource):
     def _fetch_messages(self, client, talker_id: int) -> list[dict]:
         resp = client.get(
             "https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs",
-            params={"talker_id": talker_id, "size": 40},
+            params={"talker_id": talker_id, "size": 60},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -202,7 +202,7 @@ def _build_recent_history(messages: list, my_uid: str) -> tuple[list[dict], str 
     recent.reverse()  # 转为正序（最老在前），LLM 按时间顺序理解
 
     summary_text = None
-    if len(recent) > 20:
+    if len(recent) > 30:
         oldest_15 = recent[:15]  # 取最老的 15 条（正序后前 15 条即最老）
         lines = []
         for item in oldest_15:

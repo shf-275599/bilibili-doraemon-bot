@@ -66,7 +66,7 @@ def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
         parts.append(f"对话背景摘要：{event.conversation_summary}")
     if event.recent_replies:
         parts.append("历史对话：")
-        for hist in event.recent_replies[-5:]:
+        for hist in event.recent_replies[-10:]:
             role_label = "我" if hist["role"] == "bot" else "对方"
             parts.append(f"  {role_label}：{hist['content'][:100]}")
 
@@ -94,7 +94,7 @@ def build_dm_messages(event: DMEvent, config) -> list[dict[str, str]]:
         messages.append({"role": "system", "content": f"对话背景摘要：{event.conversation_summary}"})
 
     if event.recent_messages:
-        for hist in event.recent_messages[-10:]:
+        for hist in event.recent_messages[-15:]:
             messages.append({"role": "user" if hist["role"] == "user" else "assistant", "content": hist["content"]})
 
     now = datetime.now(CST)
