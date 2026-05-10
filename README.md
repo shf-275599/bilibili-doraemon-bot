@@ -6,8 +6,8 @@
 
 - **Pipeline 管道架构** - 模块化处理流程（dedup → filter → rate_limit → generate → safety → send）
 - **多来源监听** - 消息通知回复、@我消息、自己动态评论、自己视频评论、私信
-- **AI 智能回复** - DeepSeek V4 Flash，基于 smolagents 的 Tool Calling Agent（`ToolCallingAgent`），支持工具调用（视频内容获取、联网搜索）
-- **上下文富化** - 自动携带视频标题、父评论内容、私信对话历史、BV号、用户画像、视频热度、评论区热门评论及情绪分析
+- **AI 智能回复** - DeepSeek V4 Flash，基于 PydanticAI Agent 的工具调用（Tool Calling）
+- **上下文富化** - 自动携带视频标题、父评论内容、私信对话历史、BV号、用户画像、视频热度
 - **视频内容工具** - 用户 @bot 可获取视频 AI 摘要，不可用时自动降级为 Whisper 语音转录
 - **联网搜索** - Tavily 优先（每日配额），自动降级到 DuckDuckGo
 - **Cookie 自动刷新** - RSA-OAEP 加密 + refresh_csrf 完整链路
@@ -15,13 +15,12 @@
 - **保守风控** - 随机延迟、来源熔断、全局熔断、小时/日回复上限、单用户/单内容频控
 - **类型安全配置** - Pydantic v2 配置验证
 - **结构化日志** - structlog JSON 格式，便于监控
-- **工具调用日志** - smolagents 内置日志记录每次工具调用的规划、步骤和结果
+- **工具调用日志** - PydanticAI Tool 包装器自动记录每次工具调用的参数和结果
 - **每日统计报告** - 定时向主人推送当日回复/工具调用/错误统计
 - **自动跳过** - 同一用户反复触发 fatal 错误时自动跳过，节省 API 调用
 - **多轮对话记忆** - 私信超 30 条时自动总结对话背景；评论连续对话持久化到 `bot-state.json`
 - **评论连续对话** - 追踪同一用户在同一视频下的连续对话，保持回复连贯性
 - **回复质量反馈** - 每 6 小时检查最近 7 天自己回复的点赞/回复数，追踪回复效果
-- **评论区热评注入** - msgfeed 源拉取前 5 条热评 + 评论区情绪分析，让 AI 理解评论区整体氛围
 
 ## 快速开始
 
@@ -161,6 +160,9 @@ poll_interval_seconds = 5          # 主循环间隔
 log_level = "INFO"                 # 日志级别（DEBUG/INFO/WARNING/ERROR）
 request_timeout_seconds = 25       # 所有 HTTP 请求超时
 source_failure_cooldown_seconds = 180  # 来源熔断冷却时间
+report_enabled = true               # 启用每日统计报告
+report_owner_uid = "363098992"      # 报告接收者 UID
+report_hour = 0                     # 报告发送时间（0=午夜）
 
 [sources.msgfeed]
 enabled = true                     # 消息通知回复源（主回复源，覆盖所有评论回复）
@@ -290,20 +292,20 @@ bilibili-bot/
 │   │   ├── dedup.py          # 去重（新/已回复/已见/失败重试/致命错误）
 │   │   ├── filter.py         # 过滤（自己/空/黑名单/纯颜文字/过短/仅关注）
 │   │   ├── rate_limit.py     # 频控 + 熔断（小时/日/用户/OID 多维度）
-│   │   ├── generate.py       # AI 生成（smolagents ToolCallingAgent + Provider 降级）
+│   │   ├── generate.py       # AI 生成（PydanticAI Agent + Provider 降级）
 │   │   ├── safety.py         # 内容安全审查（敏感词/PII/链接/长度）
 │   │   └── send.py           # 发送（评论 WBI + 私信 WBI 签名）
 │   ├── providers/            # AI Provider
 │   │   ├── base.py           # Provider ABC + ReplyResult
-│   │   ├── openai_compat.py  # OpenAI 兼容 Provider（纯生成，无 tool calling）
+│   │   ├── openai_compat.py  # OpenAI 兼容 Provider（generate + PydanticAI Agent 桥接）
 │   │   └── manager.py        # Provider 管理
-│   ├── tools/                # smolagents @tool 工具
-│   │   ├── __init__.py       # @tool 定义 + 实现（get_video_content / search_web）
+│   ├── tools/                # PydanticAI Tool 工具系统
+│   │   ├── __init__.py       # Tool 定义 + 实现（PydanticAI Tool 包装器）
 │   │   ├── transcribe.py     # Whisper 语音转录（yt-dlp + faster-whisper）
 │   │   └── web_search.py     # 联网搜索（Tavily + DuckDuckGo 降级）
 │   └── sources/              # 数据来源
 │       ├── base.py           # Source ABC
-│       ├── msgfeed.py        # 消息通知回复 + bvid 补充 + 用户画像 + 热评注入
+│       ├── msgfeed.py        # 消息通知回复 + bvid 补充 + 用户画像
 │       ├── mention.py        # @我消息（复用 msgfeed enrich 逻辑）
 │       ├── own_video.py      # 自己视频评论（带重试）
 │       ├── own_dynamic.py    # 自己动态评论（视频/图文）
@@ -312,12 +314,12 @@ bilibili-bot/
 │   └── bilibili_wbi.py       # WBI 签名 + AI 摘要 + 用户信息 + 用户搜索
 ├── models/whisper/           # Whisper 模型（gitignored）
 ├── config/                   # 配置文件
-│   ├── system-prompt.txt     # 角色 Prompt（独立维护，7 大场景策略）
+│   ├── system-prompt.txt     # 角色 Prompt（独立维护）
 │   ├── bot-config.toml       # 机器人完整配置
 │   ├── bilibili-cookies.txt  # B站 Cookie（Netscape 格式，gitignored）
 │   └── bilibili-cookies.example.txt
 ├── data/                     # 运行时数据（gitignored）
-├── tests/                    # 单元测试（20 个）
+├── tests/                    # 单元测试（31 个）
 ├── bilibot.service           # systemd 服务文件
 ├── pyproject.toml
 └── README.md
@@ -333,43 +335,46 @@ Source.fetch() → [Event]
 DedupStage      → 跳过已处理（失败重试最多 5 次，冷却 5 分钟；致命错误 1 小时后过期）
 FilterStage     → 跳过自己/空/黑名单/纯颜文字/过短/非关注（DM pipeline 跳过此阶段）
 RateLimitStage  → 频控检查 + 等待随机延迟
-GenerateStage   → smolagents ToolCallingAgent 带工具调用生成 → 失败降级 Provider.generate()
+GenerateStage   → PydanticAI Agent 带工具调用生成（自定义 loop → PydanticAI agent.run_sync）→ 失败降级 Provider.generate()
 SafetyStage     → 敏感词/PII/链接/长度四重检查
 SendStage       → 发送到 Bilibili API（评论 WBI 签名 + 私信 WBI 签名）
 ```
 
-### Tool Calling 流程（smolagents）
+### Tool Calling 流程（PydanticAI）
 
 ```
 用户评论 "总结一下这个视频"
     ↓
-GenerateStage._generate_with_agent()
+GenerateStage._generate_reply_with_tools()
     ↓
-smolagents ToolCallingAgent
-    ├─ model=LiteLLMModel("openai/deepseek-v4-flash")
-    ├─ tools=[get_video_content, search_web]
-    ├─ 最多 3 步规划-执行循环
-    └─ 输出 → 提取为回复文本
+PydanticAI Agent
+    ├─ _create_pydantic_agent(system_prompt, config, provider)
+    ├─ agent.run_sync(user_prompt, message_history, model_settings, usage_limits)
+    ├─ 最多 tool_max_iterations 轮工具调用
+    └─ result.output → ReplyResult(text=..., tool_calls=[...])
         │
-        ├─ 成功 → ReplyResult(text=..., tool_calls=[...])
+        ├─ 成功 → 返回回复
         └─ 异常 → 降级 Provider.generate_reply()（纯 LLM 回复，无工具）
 ```
 
 **工具定义**（`tools/__init__.py`）：
 ```python
-@tool
 def get_video_content(bvid: str) -> str: ...
     # AI 摘要 → 失败 → Whisper 转录 → 失败 → 错误提示
 
-@tool  
 def search_web(query: str) -> str: ...
     # Tavily → 配额耗尽/失败 → DuckDuckGo → 失败 → 错误提示
+
+TOOLS = [
+    Tool(_with_tool_logging(get_video_content)),
+    Tool(_with_tool_logging(search_web)),
+]
 ```
 
-**smolagents vs 旧方案**：
-- 旧：手写 ~60 行 tool calling 循环（`openai_compat.py` 的 `generate_with_tools`），手动管理 messages、tool_calls 解析、迭代控制
-- 新：smolagents `ToolCallingAgent` 一行 `agent.run(user_msg)` 完成规划-执行-输出全流程，内置 LiteLLM 支持 DeepSeek
-- 降级：smolagents 异常时自动降级为 `ProviderManager.generate_reply()`（纯 LLM 回复，无工具）
+**PydanticAI vs 旧方案**：
+- 旧：手写 ~60 行 tool calling 循环（`openai_compat.py` 的 `generate_with_tools`），手动管理 messages、tool_calls 解析、reasoning_content 回传、迭代控制
+- 新：PydanticAI `Agent` 一行 `agent.run_sync()` 完成规划-执行-输出全流程，内置 OpenAI-compatible HTTP 客户端，原生支持 DeepSeek V4 Flash
+- 降级：Agent 异常时自动降级为 `ProviderManager.generate_reply()`（纯 LLM 回复，无工具）
 
 ### 事件模型
 
@@ -437,11 +442,6 @@ Bot 在生成 AI 回复前，会从 B站 API 实时获取额外信息注入 prom
 视频收藏数：2000                                ← 从 /x/web-interface/view 获取
 UP主：测试UP主                                 ← 从 /x/web-interface/view 获取
 UP主粉丝数：50000                              ← 从 /x/space/wbi/acc/info 查
-评论区情绪：积极                                ← 从 /x/v2/reply 热评分析
-热门评论：                                      ← 从 /x/v2/reply 获取 top 5
-  1. 这也太强了吧（233赞）
-  2. 已三连，求更新（156赞）
-  ...
 对话背景摘要：用户之前问过好                     ← 从 bot-state.json 的 comment_contexts 获取
 历史对话：                                      ← 从 bot-state.json 的 comment_contexts 获取
   对方：你好
@@ -459,7 +459,6 @@ UP主粉丝数：50000                              ← 从 /x/space/wbi/acc/inf
 - `parent_content` / `thread_context` → 来源 API 返回的 `parent_reply` 字段
 - `author_follower` / `author_level` / `author_fans_count` → `MsgFeedReplySource._enrich_users()` 调用 `/x/space/wbi/acc/info`
 - `interaction_count` / `recent_replies` / `conversation_summary` → 从 `bot-state.json` 的 `comment_contexts` 获取
-- `hot_comments` / `comment_area_sentiment` → `MsgFeedReplySource._enrich_hot_comments()` 调用 `/x/v2/reply` 获取前 5 条热评，分析评论区情绪（positive/negative/neutral）
 
 #### 私信场景
 
@@ -488,7 +487,7 @@ UP主粉丝数：50000                              ← 从 /x/space/wbi/acc/inf
 
 ### 每日统计报告
 
-Bot 每天 22:00 自动生成统计报告，通过私信发送给主人（UID `363098992`）：
+Bot 每天 0:00 自动生成统计报告，通过私信发送给主人（UID `363098992`）：
 
 ```
 📊 今日报告
@@ -566,20 +565,25 @@ PYTHONPATH=src .venv/bin/pytest tests/ -v
 ```bash
 cd /home/shf/bilibili-bot && source .env
 
-# 验证 smolagents 工具链
+# 验证 PydanticAI 工具链
 .venv/bin/python3 -c "
-from smolagents import LiteLLMModel, ToolCallingAgent
-from bilibili_bot.tools import get_video_content, search_web
-agent = ToolCallingAgent(
-    tools=[get_video_content, search_web],
-    model=LiteLLMModel(model_id='openai/deepseek-v4-flash', api_base='https://api.deepseek.com/v1', api_key=__import__('os').environ['DEEPSEEK_API_KEY']),
-    max_steps=1,
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
+from bilibili_bot.tools import TOOLS
+import os
+
+provider = OpenAIProvider(
+    base_url='https://api.deepseek.com/v1',
+    api_key=os.environ['DEEPSEEK_API_KEY'],
 )
-result = agent.run('你好，回复一个简短的打招呼')
-print(result)
+model = OpenAIChatModel('deepseek-v4-flash', provider=provider)
+agent = Agent(model, system_prompt='用中文回复', tools=TOOLS)
+result = agent.run_sync('回复你好')
+print(result.output[:50])
 "
 
-# 验证 AI Provider（直接调用，无工具）
+# 验证 openai_compat Provider 生成
 .venv/bin/python3 -c "
 from bilibili_bot.config import BotConfig
 from bilibili_bot.providers.openai_compat import OpenAICompatibleProvider
