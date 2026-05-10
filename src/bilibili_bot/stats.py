@@ -12,9 +12,9 @@ CST = timezone(timedelta(hours=8))
 
 
 def generate_daily_report(store) -> str:
-    """生成每日回复统计报告（过去 24 小时），返回格式化中文文本。"""
-    now = time.time()
-    day_start = now - 86400
+    """生成每日回复统计报告（当天 00:00 至今），返回格式化中文文本。"""
+    now = datetime.now(CST)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
     comment_count = 0
     dm_count = 0
