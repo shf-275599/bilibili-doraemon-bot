@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -13,6 +13,7 @@ class ReplyResult:
     error: str = ""
     retriable: bool = False
     raw: Any = None
+    tool_calls: list[str] = field(default_factory=list)
 
 
 class BaseProvider(ABC):

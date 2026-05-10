@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -26,6 +26,7 @@ class PipelineContext:
     provider_used: str = ""
     auto_skip: Any = None
     store: Any = None
+    tool_calls: list[str] = field(default_factory=list)
 
 
 class PipelineStage(ABC):

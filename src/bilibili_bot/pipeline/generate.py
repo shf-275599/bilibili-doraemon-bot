@@ -130,6 +130,7 @@ class AIGenerateStage(PipelineStage):
 
         context.reply_text = reply.text
         context.provider_used = reply.provider
+        context.tool_calls = reply.tool_calls
         return StageResult.CONTINUE
 
 

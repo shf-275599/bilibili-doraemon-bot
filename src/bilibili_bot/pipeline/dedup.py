@@ -107,7 +107,7 @@ class DedupService:
             "event": event.to_dict(),
         })
 
-    def mark_replied(self, event: Event, reply_text: str, provider: str) -> None:
+    def mark_replied(self, event: Event, reply_text: str, provider: str, tool_calls: list[str] | None = None) -> None:
         ts = time.time()
         self._store.append_processed({
             "event_key": event.event_key,
@@ -123,6 +123,7 @@ class DedupService:
             "replied_at": ts,
             "provider_used": provider,
             "reply_text": reply_text,
+            "tool_calls": tool_calls or [],
             "event": event.to_dict(),
         })
 

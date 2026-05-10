@@ -111,11 +111,13 @@ class OpenAICompatibleProvider(BaseProvider):
         max_iterations: int = 3,
     ) -> ReplyResult:
         current_messages = list(messages)
+        called_tools: set[str] = set()
 
         for _ in range(max_iterations):
             result = self._call_api(current_messages, tools=tools)
 
             if result.success:
+                result.tool_calls = list(called_tools)
                 return result
 
             if result.error == "TOOL_CALLS" and result.raw:
@@ -134,6 +136,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
                 for tc in tool_calls:
                     fn_name = tc["function"]["name"]
+                    called_tools.add(fn_name)
                     try:
                         fn_args = json.loads(tc["function"]["arguments"])
                     except json.JSONDecodeError:

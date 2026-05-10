@@ -101,7 +101,7 @@ class SendStage(PipelineStage):
 
         if context.dry_run:
             logger.info("dry_run", event_key=event.event_key, reply=context.reply_text[:50])
-            context.dedup.mark_replied(event, context.reply_text, f"{context.provider_used}:dry-run")
+            context.dedup.mark_replied(event, context.reply_text, f"{context.provider_used}:dry-run", context.tool_calls)
             context.rate_limiter.record_success(user_id=event.author_id, oid=event.target_id)
             
             if isinstance(event, CommentEvent) and hasattr(context, 'store') and context.store:
@@ -132,7 +132,7 @@ class SendStage(PipelineStage):
 
         if success:
             logger.info("send_success", event_key=event.event_key)
-            context.dedup.mark_replied(event, context.reply_text, context.provider_used)
+            context.dedup.mark_replied(event, context.reply_text, context.provider_used, context.tool_calls)
             context.rate_limiter.record_success(user_id=event.author_id, oid=event.target_id)
             
             if isinstance(event, CommentEvent) and hasattr(context, 'store') and context.store:

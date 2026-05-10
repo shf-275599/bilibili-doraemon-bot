@@ -49,18 +49,35 @@ def generate_daily_report(store) -> str:
                     comment_count += 1
 
                 reply_text = record.get("reply_text", "")
-                provider_used = record.get("provider_used", "")
 
                 total_reply_chars += len(reply_text)
 
-                if _is_video_summary(reply_text, provider_used):
+                tool_calls = record.get("tool_calls", [])
+                if "get_video_content" in tool_calls:
                     video_summary_count += 1
-
-                if _is_search_call(reply_text, provider_used):
+                if "search_web" in tool_calls:
                     search_count += 1
 
-                if _is_error(reply_text, provider_used):
-                    error_count += 1
+    # 从 processed.jsonl 统计回复失败记录（按 event_key 去重）
+    failed_events: set[str] = set()
+    if store.processed_path.exists():
+        with store.processed_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                seen_at = record.get("seen_at", 0)
+                if seen_at < day_start:
+                    continue
+                if record.get("reply_status") != "replied":
+                    key = record.get("event_key", "")
+                    if key:
+                        failed_events.add(key)
+    error_count = len(failed_events)
 
     total_replies = comment_count + dm_count
     quota_used, quota_total = _read_search_quota(store)
@@ -100,27 +117,12 @@ def _estimate_api_calls(total_replies: int, video_summaries: int, searches: int)
 
 
 def _estimate_tokens(total_replies: int, total_chars: int) -> str:
-    reply_tokens = total_replies * 200
+    reply_tokens = int(total_chars / 2)  # 中文约 1.5-2 字符/token
     prompt_tokens = total_replies * 800
     total = reply_tokens + prompt_tokens
     if total >= 10000:
         return f"{total / 1000:.1f}k"
     return str(total)
-
-
-def _is_video_summary(reply_text: str, provider_used: str) -> bool:
-    video_markers = ["视频总结", "视频内容", "这个视频讲了", "视频主要", "视频介绍了"]
-    return any(marker in reply_text for marker in video_markers)
-
-
-def _is_search_call(reply_text: str, provider_used: str) -> bool:
-    search_markers = ["搜索结果", "搜到", "找到", "搜索显示", "根据搜索"]
-    return any(marker in reply_text for marker in search_markers)
-
-
-def _is_error(reply_text: str, provider_used: str) -> bool:
-    error_markers = ["错误", "失败", "异常", "出错", "暂时不可用", "稍后再试"]
-    return any(marker in reply_text for marker in error_markers)
 
 
 def _source_health(store) -> str:
