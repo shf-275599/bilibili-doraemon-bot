@@ -10,7 +10,7 @@ from bilibili_bot.pipeline.base import PipelineStage, PipelineContext, StageResu
 
 logger = structlog.get_logger()
 
-COMMENT_TYPE_MAP = {"video": 1, "dynamic": 17, "dynamic_draw": 11}
+COMMENT_TYPE_MAP = {"video": 1, "dynamic": 17, "dynamic_draw": 11, "article": 12}
 
 
 def send_comment_reply(event: CommentEvent, reply_text: str, client) -> tuple[bool, str, bool]:
