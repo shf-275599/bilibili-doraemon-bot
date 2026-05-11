@@ -176,9 +176,12 @@ class MsgFeedReplySource(BaseSource):
                     summary = info.get("summary", "") or ""
                     if summary and summary != event.video_title:
                         event.video_desc = summary[:500]
-                    article_images = (info.get("origin_image_urls", []) or []) or (info.get("image_urls", []) or [])
-                    if article_images:
-                        event.images = [u for u in article_images if isinstance(u, str) and u]
+                    content_html = info.get("content", "") or ""
+                    if content_html:
+                        import re as _re
+                        article_images = _re.findall(r'<img[^>]+src="([^"]+)"', content_html)
+                        if article_images:
+                            event.images = article_images
 
             elif event.business_type in ("dynamic", "dynamic_draw"):
                 uri = (event.raw_payload.get("item", {}) or {}).get("uri", "")
