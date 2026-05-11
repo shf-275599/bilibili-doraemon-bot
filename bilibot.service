@@ -1,11 +1,7 @@
 [Unit]
-Description=Bilibili 评论自动回复机器人 v2
+Description=Bilibili 评论自动回复机器人 v3
 After=network-online.target
 Wants=network-online.target
-
-# 用户级 systemd 服务，安装在 ~/.config/systemd/user/
-# 自动启动：systemctl --user enable --now bilibot.service
-# WSL 开机自启：需要先运行 sudo loginctl enable-linger $USER
 
 [Service]
 Type=simple
@@ -20,6 +16,22 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bilibot
 LimitNOFILE=4096
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictAddressFamilies=AF_INET AF_INET6
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+MemoryMax=2G
+CPUQuota=200%
+
+ReadWritePaths=%h/bilibili-bot/data
+ReadWritePaths=%h/bilibili-bot/audio
+ReadWritePaths=%h/bilibili-bot/config
 
 [Install]
 WantedBy=default.target
