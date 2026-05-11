@@ -8,6 +8,9 @@ from bilibili_bot.sources.base import BaseSource
 
 logger = structlog.get_logger()
 
+# 动态标题缓存：opus_id → title（mention 事件写入，reply 事件读取）
+_dynamic_title_cache: dict[str, str] = {}
+
 
 def _extract_opus_id(uri: str) -> str:
     """从 B站动态 URI 中提取 opus ID，如 'https://www.bilibili.com/opus/1197036032889978896' → '1197036032889978896'"""
@@ -92,7 +95,6 @@ class MsgFeedReplySource(BaseSource):
                     event.up_name = owner.get("name", "")
 
             elif event.business_type in ("dynamic", "dynamic_draw"):
-                # 从 raw_payload 的 uri 中提取 opus ID，调动态详情 API 获取真实内容
                 uri = (event.raw_payload.get("item", {}) or {}).get("uri", "")
                 if not uri:
                     uri = (event.raw_payload.get("uri", "") or "")
@@ -100,6 +102,17 @@ class MsgFeedReplySource(BaseSource):
                 if not opus_id:
                     continue
 
+                # 如果已有 video_title（mention 源从 item.title 提取），写入缓存
+                if event.video_title:
+                    _dynamic_title_cache[opus_id] = event.video_title
+                    continue
+
+                # reply 源：先查缓存
+                if opus_id in _dynamic_title_cache:
+                    event.video_title = _dynamic_title_cache[opus_id]
+                    continue
+
+                # 缓存没有，调动态详情 API
                 if opus_id not in cache:
                     try:
                         resp = client.get(
@@ -121,6 +134,7 @@ class MsgFeedReplySource(BaseSource):
                     text = (desc.get("text", "") or "").strip()
                     if text:
                         event.video_title = text[:500]
+                        _dynamic_title_cache[opus_id] = event.video_title
 
         self._enrich_users(events, client)
 
