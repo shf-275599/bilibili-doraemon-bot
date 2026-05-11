@@ -173,6 +173,21 @@ class MsgFeedReplySource(BaseSource):
                         event.video_title = text[:500]
                         _dynamic_title_cache[dynamic_id] = event.video_title
 
+                    # 提取图片 URL（动态/图文动态）
+                    major = dyn.get("major", {}) or {}
+                    draw = major.get("draw", {}) or {}
+                    draw_items = draw.get("items", []) or []
+                    if draw_items:
+                        event.images = [d.get("src", "") for d in draw_items if d.get("src")]
+                    # 转发动态也查原始图片
+                    if not event.images and item.get("type") == "DYNAMIC_TYPE_FORWARD":
+                        orig = item.get("orig", {}) or {}
+                        om = (orig.get("modules", {}) or {}).get("module_dynamic", {}) or {}
+                        om_draw = (om.get("major", {}) or {}).get("draw", {}) or {}
+                        om_items = om_draw.get("items", []) or []
+                        if om_items:
+                            event.images = [d.get("src", "") for d in om_items if d.get("src")]
+
         self._enrich_users(events, client)
 
         self._enrich_users(events, client)

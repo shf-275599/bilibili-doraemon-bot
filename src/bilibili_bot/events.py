@@ -65,6 +65,8 @@ class CommentEvent(Event):
     hot_comments: list = field(default_factory=list)
     comment_area_sentiment: str = ""  # positive/negative/neutral
     
+    images: list[str] = field(default_factory=list)  # 动态/图文事件的图片 URL
+    
     recent_replies: list = field(default_factory=list)
     conversation_summary: str = ""
 
