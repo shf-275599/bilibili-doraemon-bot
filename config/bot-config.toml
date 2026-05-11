@@ -49,7 +49,7 @@ primary_provider = "deepseek" # 主 AI Provider（DeepSeek V4 Flash）
 timeout_seconds = 25
 max_reply_chars = 100
 tools_enabled = true           # 启用 LLM Function Calling（视频摘要/转录/联网搜索）
-tool_max_iterations = 3       # 工具调用最大迭代次数
+tool_max_iterations = 6       # 工具调用最大迭代次数（request_limit=6）
 search_quota_daily = 30    # 每日搜索次数上限
 
 [ai.providers.deepseek]
@@ -61,7 +61,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 [reply]
 system_prompt_file = "config/system-prompt.txt"
 temperature = 0.5
-max_tokens = 800
+max_tokens = 1500
 
 [rate_limit]
 min_request_interval_seconds = 0.5
@@ -74,6 +74,12 @@ circuit_breaker_cooldown_seconds = 600
 max_hourly_replies = 20
 max_daily_replies = 100
 source_circuit_breaker_failures = 3
+
+[content_safety]
+sensitive_words = []
+max_length = 1200     # 回复最大字数（私信可适当放宽）
+max_url_count = 3
+block_pii = true
 
 [cookie]
 cookies_file = "config/bilibili-cookies.txt"

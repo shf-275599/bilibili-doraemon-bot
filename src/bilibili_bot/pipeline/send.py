@@ -88,6 +88,7 @@ def send_dm_reply(event: DMEvent, reply_text: str, client) -> tuple[bool, str, b
         if result.get("code") == 0:
             return True, "发送成功", False
 
+        logger.warning("send_dm_raw_response", code=result.get("code"), msg=result.get("msg"), data=data.get("msg[sender_uid]"), receiver=data.get("msg[receiver_id]"))
         return False, f"发送失败 code={result.get('code')} msg={result.get('msg')}", True
 
     except Exception as e:
