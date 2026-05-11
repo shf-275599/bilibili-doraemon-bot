@@ -13,7 +13,7 @@ from pydantic_ai import Tool
 logger = structlog.get_logger()
 
 # 包根目录（src/bilibili_bot/ 的上两级 → 项目根）
-_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCRIPTS_DIR = _PACKAGE_ROOT / "scripts"
 COOKIES_FILE = str(_PACKAGE_ROOT / "config" / "bilibili-cookies.txt")
 WHISPER_MODEL = str(
