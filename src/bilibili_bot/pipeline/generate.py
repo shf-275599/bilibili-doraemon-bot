@@ -50,7 +50,8 @@ def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
     if event.bvid and event.business_type == "video":
         parts.append(f"视频BV号：{event.bvid}")
     if event.video_desc:
-        parts.append(f"视频简介：{event.video_desc}")
+        desc_label = "文章摘要" if event.business_type == "article" else "视频简介"
+        parts.append(f"{desc_label}：{event.video_desc}")
     if event.thread_context:
         parts.append(f"对话上下文：{event.thread_context}")
     if event.author_follower:

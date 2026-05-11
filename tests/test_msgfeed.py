@@ -410,16 +410,20 @@ class TestArticleEnrich:
 
         assert event.video_title == ""  # enrichment 失败，保持原样
 
-    def test_article_skip_when_title_already_set(self, source):
-        """event.video_title 已有值时不调文章 API。"""
+    def test_article_enrich_even_when_title_set(self, source):
+        """event.video_title 已有值时仍调文章 API 获取摘要。"""
         article_id = "48872105"
-        client = MagicMock()
+        client = make_mock_client({
+            "code": 0,
+            "data": {"title": "专栏标题", "summary": "这是一篇很长的专栏正文内容不同于标题"}
+        })
 
         event = make_event("article", article_id, video_title="已有标题")
         source._enrich_events([event], client)
 
-        client.get.assert_not_called()
-        assert event.video_title == "已有标题"
+        client.get.assert_called()  # 即使 title 已设，仍应调 API
+        assert event.video_title == "专栏标题"
+        assert event.video_desc == "这是一篇很长的专栏正文内容不同于标题"
 
 
 # ===================================================================

@@ -123,9 +123,6 @@ class MsgFeedReplySource(BaseSource):
                     event.up_name = owner.get("name", "")
 
             elif event.business_type == "article":
-                if event.video_title:
-                    continue
-
                 uri = (event.raw_payload.get("item", {}) or {}).get("uri", "")
                 if not uri:
                     uri = (event.raw_payload.get("uri", "") or "")
