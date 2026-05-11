@@ -66,7 +66,7 @@ def transcribe_video(bvid: str, model_path: str, cookies_file: str) -> str:
         return ""
 
 
-def _download_audio(url: str, output: str, cookies_file: str, max_retries: int = 2) -> None:
+def _download_audio(url: str, output: str, cookies_file: str, max_retries: int = 3) -> None:
     cmd = [
         "yt-dlp",
         "--cookies", cookies_file,
@@ -74,7 +74,6 @@ def _download_audio(url: str, output: str, cookies_file: str, max_retries: int =
         "--audio-format", "wav",
         "--audio-quality", "0",
         "--output", output,
-        "--quiet",
         "--no-playlist",
         url,
     ]
@@ -84,10 +83,16 @@ def _download_audio(url: str, output: str, cookies_file: str, max_retries: int =
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
         if result.returncode == 0:
             return
-        last_error = f"yt-dlp 失败 (code={result.returncode}): {result.stderr[:300]}"
-        logger.warning("yt-dlp_retry", attempt=attempt+1, max_retries=max_retries, error=last_error)
+        last_error = f"yt-dlp 失败 (code={result.returncode})"
+        logger.warning(
+            "yt-dlp_retry",
+            attempt=attempt + 1,
+            max_retries=max_retries,
+            error=last_error,
+            stderr=result.stderr[-500:] if result.stderr else "",
+        )
         if attempt < max_retries - 1:
-            time.sleep(3)
+            time.sleep(5)
 
     raise RuntimeError(last_error)
 

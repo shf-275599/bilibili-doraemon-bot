@@ -52,7 +52,7 @@ def _get_video_content(bvid: str) -> str:
         return "错误：未提供 BV 号"
 
     summary = _try_ai_summary(bvid)
-    if summary and "不可用" not in summary and "失败" not in summary and "错误" not in summary:
+    if summary:
         return f"【AI 摘要】{summary}"
 
     logger.info("summary_unavailable_fallback_transcript", bvid=bvid)
