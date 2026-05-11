@@ -79,8 +79,6 @@ class AIProviderConfig(BaseModel):
     base_url: Optional[str] = None
     model: Optional[str] = None
     api_key_env: Optional[str] = None
-    command: Optional[str] = None
-    dir: Optional[str] = None
 
 
 class AIConfig(BaseModel):

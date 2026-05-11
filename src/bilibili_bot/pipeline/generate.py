@@ -59,8 +59,6 @@ def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
         parts.append(f"视频收藏数：{event.video_favorite_count}")
     if event.up_name:
         parts.append(f"UP主：{event.up_name}")
-    if event.up_fans_count > 0:
-        parts.append(f"UP主粉丝数：{event.up_fans_count}")
 
     if event.conversation_summary:
         parts.append(f"对话背景摘要：{event.conversation_summary}")

@@ -6,7 +6,6 @@ import functools
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
 
 import structlog
 from pydantic_ai import Tool

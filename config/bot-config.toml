@@ -2,7 +2,6 @@
 enabled = true
 poll_interval_seconds = 5
 run_mode = "daemon"
-conservative_mode = true
 log_level = "INFO"
 request_timeout_seconds = 25
 source_failure_cooldown_seconds = 180
@@ -43,7 +42,6 @@ skip_empty = true
 skip_pure_emoji = true
 min_meaningful_length = 2
 blacklist_mids = []
-duplicate_window_minutes = 1440
 followed_only = false  # 设为 true 则只回复关注了 bot 的用户
 
 [ai]
@@ -64,8 +62,6 @@ api_key_env = "DEEPSEEK_API_KEY"
 system_prompt_file = "config/system-prompt.txt"
 temperature = 0.5
 max_tokens = 800
-prefix = ""
-mention_style = "friendly"
 
 [rate_limit]
 min_request_interval_seconds = 0.5

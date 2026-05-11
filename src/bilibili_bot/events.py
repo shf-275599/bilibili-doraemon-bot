@@ -59,12 +59,8 @@ class CommentEvent(Event):
     
     video_view_count: int = 0
     video_like_count: int = 0
-    video_coin_count: int = 0
     video_favorite_count: int = 0
-    video_share_count: int = 0
-    video_reply_count: int = 0
     up_name: str = ""
-    up_fans_count: int = 0
     
     hot_comments: list = field(default_factory=list)
     comment_area_sentiment: str = ""  # positive/negative/neutral
@@ -107,12 +103,8 @@ class CommentEvent(Event):
             "interaction_count": self.interaction_count,
             "video_view_count": self.video_view_count,
             "video_like_count": self.video_like_count,
-            "video_coin_count": self.video_coin_count,
             "video_favorite_count": self.video_favorite_count,
-            "video_share_count": self.video_share_count,
-            "video_reply_count": self.video_reply_count,
             "up_name": self.up_name,
-            "up_fans_count": self.up_fans_count,
             "hot_comments_count": len(self.hot_comments),
             "comment_area_sentiment": self.comment_area_sentiment,
             "recent_replies_count": len(self.recent_replies),

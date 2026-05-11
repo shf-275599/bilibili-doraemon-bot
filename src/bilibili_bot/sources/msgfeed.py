@@ -77,10 +77,7 @@ class MsgFeedReplySource(BaseSource):
                 stat = info.get("stat", {})
                 event.video_view_count = stat.get("view", 0)
                 event.video_like_count = stat.get("like", 0)
-                event.video_coin_count = stat.get("coin", 0)
                 event.video_favorite_count = stat.get("favorite", 0)
-                event.video_share_count = stat.get("share", 0)
-                event.video_reply_count = stat.get("reply", 0)
                 
                 owner = info.get("owner", {})
                 event.up_name = owner.get("name", "")

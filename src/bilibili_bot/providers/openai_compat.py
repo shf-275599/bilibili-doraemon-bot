@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 import requests
 import structlog
@@ -66,7 +65,6 @@ class OpenAICompatibleProvider(BaseProvider):
     def _call_api(
         self,
         messages: list[dict[str, str]],
-        tools: list[dict[str, Any]] | None = None,
     ) -> ReplyResult:
         api_key_env = self.provider_config.get("api_key_env", "")
         api_key = os.environ.get(api_key_env, "")
@@ -82,16 +80,12 @@ class OpenAICompatibleProvider(BaseProvider):
         base_url = self.provider_config.get("base_url", "").rstrip("/")
         model = self.provider_config.get("model", "")
 
-        payload: dict[str, Any] = {
+        payload: dict = {
             "model": model,
             "messages": messages,
             "temperature": self.global_config.reply.temperature,
             "max_tokens": self.global_config.reply.max_tokens,
         }
-
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
 
         try:
             response = requests.post(
@@ -116,18 +110,6 @@ class OpenAICompatibleProvider(BaseProvider):
             data = response.json()
             choice = data["choices"][0]
             message = choice.get("message", {})
-
-            if message.get("tool_calls") and tools:
-                return ReplyResult(
-                    False,
-                    provider=self.name,
-                    error="TOOL_CALLS",
-                    retriable=False,
-                    raw={
-                        "tool_calls": message["tool_calls"],
-                        "full_message": message,  # 保留 reasoning_content 等字段
-                    },
-                )
 
             text = message.get("content", "").strip()
         except (KeyError, IndexError, ValueError, TypeError) as exc:

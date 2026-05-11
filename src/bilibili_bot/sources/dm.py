@@ -12,7 +12,6 @@ class DMSource(BaseSource):
     def __init__(self, config):
         self.config = config
         self.max_reply_per_round = config.sources.dm.max_reply_per_round
-        self.whitelist_mids = config.sources.dm.whitelist_mids
 
     def fetch(self) -> list[Event]:
         return self.fetch_new_messages()
