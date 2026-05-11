@@ -12,8 +12,12 @@ MIXIN_KEY_ENC_TAB = [
     36, 20, 34, 44, 52
 ]
 
+MIN_KEY_LENGTH = 64
+
 
 def get_mixin_key(orig: str) -> str:
+    if len(orig) < MIN_KEY_LENGTH:
+        raise ValueError(f"WBI key too short: {len(orig)} chars, need >= {MIN_KEY_LENGTH}")
     return reduce(lambda s, i: s + orig[i], MIXIN_KEY_ENC_TAB, "")[:32]
 
 
@@ -21,11 +25,13 @@ def enc_wbi(params: dict[str, Any], img_key: str, sub_key: str) -> dict[str, Any
     mixin_key = get_mixin_key(img_key + sub_key)
     curr_time = round(time.time())
 
-    params_copy = dict(sorted(params.items()))
-    params_copy["wts"] = curr_time
-
-    params_str = "&".join(f"{k}={v}" for k, v in params_copy.items())
+    filtered = {
+        k: "".join(c for c in str(v) if c not in "!'()*")
+        for k, v in sorted(params.items())
+    }
+    filtered["wts"] = curr_time
+    params_str = "&".join(f"{k}={v}" for k, v in filtered.items())
     wbi_sign = hashlib.md5((params_str + mixin_key).encode()).hexdigest()
 
-    params_copy["w_rid"] = wbi_sign
-    return params_copy
+    filtered["w_rid"] = wbi_sign
+    return filtered

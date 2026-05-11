@@ -47,3 +47,4 @@ config/bilibili-cookies.txt
 models/
 .venv/
 audio/
+.coverage

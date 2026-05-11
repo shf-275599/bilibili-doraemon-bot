@@ -1,4 +1,4 @@
-"""Bilibili 评论自动回复机器人 v2 入口。"""
+"""Bilibili 评论自动回复机器人 v3 入口。"""
 
 import argparse
 import json as json_lib
@@ -11,10 +11,12 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 
+from bilibili_bot.atomic_state import AtomicStateStore
 from bilibili_bot.auto_skip import AutoSkipTracker
 from bilibili_bot.client import BilibiliSession
 from bilibili_bot.config import BotConfig
 from bilibili_bot.cookie import CookieRefreshManager
+from bilibili_bot.cookie_store import CookieStore
 from bilibili_bot.feedback import check_reply_quality, get_quality_summary, save_feedback
 from bilibili_bot.log import setup_logging
 from bilibili_bot.pipeline.base import Pipeline, PipelineContext
@@ -30,17 +32,16 @@ from bilibili_bot.sources.mention import MentionMsgFeedSource
 from bilibili_bot.sources.msgfeed import MsgFeedReplySource
 from bilibili_bot.sources.own_dynamic import OwnDynamicCommentSource
 from bilibili_bot.sources.own_video import OwnVideoCommentSource
-from bilibili_bot.state import StateStore
 
 logger = structlog.get_logger()
 
 CST = timezone(timedelta(hours=8))
 
 
-def _send_report_dm(config: BotConfig, report_text: str) -> bool:
-    client = BilibiliSession(config.cookie.cookies_file, config.bot.request_timeout_seconds)
-    csrf = client.get_cookies().get("bili_jct", "")
-    sender_uid = client.get_cookies().get("DedeUserID", "")
+def _send_report_dm(config: BotConfig, report_text: str, cookie_store: CookieStore) -> bool:
+    client = BilibiliSession(cookie_store, config.bot.request_timeout_seconds)
+    csrf = client.get_cookie("bili_jct", "")
+    sender_uid = client.get_cookie("DedeUserID", "")
     receiver_id = config.bot.report_owner_uid
 
     data = {
@@ -75,7 +76,7 @@ def _send_report_dm(config: BotConfig, report_text: str) -> bool:
     return result.get("code") == 0
 
 
-def _maybe_send_daily_report(config: BotConfig) -> None:
+def _maybe_send_daily_report(config: BotConfig, cookie_store: CookieStore) -> None:
     from bilibili_bot.stats import generate_daily_report
 
     now = datetime.now(CST)
@@ -84,18 +85,18 @@ def _maybe_send_daily_report(config: BotConfig) -> None:
     if now.hour != config.bot.report_hour:
         return
 
-    store = StateStore()
-    state = store.load_state()
+    atomic_store = AtomicStateStore()
+    state = atomic_store.load_state()
 
     if state.get("last_report_date") == today_str:
         return
 
-    report_text = generate_daily_report(store)
+    report_text = generate_daily_report(atomic_store)
 
-    if _send_report_dm(config, report_text):
+    if _send_report_dm(config, report_text, cookie_store):
         logger.info("daily_report_sent")
         state["last_report_date"] = today_str
-        store.save_state(state)
+        atomic_store.save_state(state)
 
 
 def create_comment_pipeline() -> Pipeline:
@@ -120,13 +121,14 @@ def create_dm_pipeline() -> Pipeline:
 
 
 def run_once(config: BotConfig, dry_run: bool = False) -> None:
-    client = BilibiliSession(config.cookie.cookies_file, config.bot.request_timeout_seconds)
-    store = StateStore()
-    dedup = DedupService(store)
-    rate_limiter = RateController(config, store)
+    cookie_store = CookieStore(config.cookie.cookies_file)
+    client = BilibiliSession(cookie_store, config.bot.request_timeout_seconds)
+    atomic_store = AtomicStateStore()
+    dedup = DedupService(atomic_store)
+    rate_limiter = RateController(config, atomic_store)
     providers = ProviderManager(config)
-    cookie_manager = CookieRefreshManager(config, store)
-    auto_skip_tracker = AutoSkipTracker(store)
+    cookie_manager = CookieRefreshManager(config, cookie_store, atomic_store)
+    auto_skip_tracker = AutoSkipTracker(atomic_store)
 
     cookie_status = cookie_manager.maybe_refresh()
     logger.info("cookie_health", valid=cookie_status.valid, message=cookie_status.message)
@@ -142,13 +144,13 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
         rate_limiter=rate_limiter,
         dry_run=dry_run,
         auto_skip=auto_skip_tracker,
-        store=store,
+        store=atomic_store,
     )
 
     comment_pipeline = create_comment_pipeline()
     dm_pipeline = create_dm_pipeline()
 
-    state = store.load_state()
+    state = atomic_store.load_state()
     source_last_run = state.get("source_last_run", {})
     now = time.time()
 
@@ -214,7 +216,7 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
 
             for event in events:
                 if hasattr(event, 'oid') and hasattr(event, 'author_mid'):
-                    comment_context = store.get_comment_context(event.oid, event.author_mid)
+                    comment_context = atomic_store.get_comment_context(event.oid, event.author_mid)
                     if comment_context:
                         event.recent_replies = comment_context.get("recent_replies", [])
                         event.conversation_summary = comment_context.get("conversation_summary", "")
@@ -230,10 +232,10 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
     last_feedback_check = state.get("last_feedback_check", 0)
     if now - last_feedback_check >= feedback_check_interval:
         try:
-            feedback_results = check_reply_quality(client, store)
+            feedback_results = check_reply_quality(client, atomic_store)
             if feedback_results:
-                save_feedback(store, feedback_results)
-            summary = get_quality_summary(store)
+                save_feedback(atomic_store, feedback_results)
+            summary = get_quality_summary(atomic_store)
             state["last_feedback_check"] = int(now)
             logger.info(
                 "feedback_check_done",
@@ -249,20 +251,20 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
     last_compact = state.get("last_compact_check", 0)
     if now - last_compact >= compact_interval:
         try:
-            file_size = store.processed_path.stat().st_size if store.processed_path.exists() else 0
-            entry_count = len(store._processed_index)
+            file_size = atomic_store.processed_path.stat().st_size if atomic_store.processed_path.exists() else 0
+            entry_count = len(atomic_store._processed_index)
             if file_size > 10_000_000 or entry_count > 5000:
-                freed = store.compact_processed()
+                freed = atomic_store.compact_processed()
                 logger.info("processed_compacted", freed_bytes=freed, entries_before=entry_count)
         except Exception as e:
             pass
         state["last_compact_check"] = int(now)
 
-    store.save_state(state)
+    atomic_store.save_state(state)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Bilibili 评论自动回复机器人 v2")
+    parser = argparse.ArgumentParser(description="Bilibili 评论自动回复机器人 v3")
     parser.add_argument("--config", default="config/bot-config.toml", help="配置文件路径")
     parser.add_argument("--once", action="store_true", help="只执行一轮")
     parser.add_argument("--dry-run", action="store_true", help="只生成回复，不实际发送")
@@ -275,6 +277,7 @@ def main() -> int:
         run_once(config, dry_run=args.dry_run)
         return 0
 
+    cookie_store = CookieStore(config.cookie.cookies_file)
     shutdown_event = threading.Event()
 
     def handle_signal(signum, frame):
@@ -294,7 +297,7 @@ def main() -> int:
 
         if config.bot.report_enabled:
             try:
-                _maybe_send_daily_report(config)
+                _maybe_send_daily_report(config, cookie_store)
             except Exception as e:
                 logger.error("daily_report_error", error=str(e))
 

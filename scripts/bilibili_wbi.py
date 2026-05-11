@@ -21,33 +21,7 @@ import os
 import random
 import requests
 
-
-# ─── WBI 签名实现 ───────────────────────────────────────────────
-
-mixin_key_enc_tab = [
-    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
-    27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
-    37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
-    22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
-]
-
-
-def get_mixin_key(orig: str) -> str:
-    """从原始密钥字符串提取 32 位 mixin key"""
-    return ''.join(orig[n] for n in mixin_key_enc_tab)[:32]
-
-
-def enc_wbi(params: dict, img_key: str, sub_key: str) -> dict:
-    """对请求参数进行 WBI 签名"""
-    mixin_key = get_mixin_key(img_key + sub_key)
-    curr_time = round(time.time())
-    params['wts'] = curr_time
-    params = dict(sorted(params.items()))
-    params = {k: ''.join(c for c in str(v) if c not in "!'()*") for k, v in params.items()}
-    query = urllib.parse.urlencode(params)
-    wbi_sign = hashlib.md5((query + mixin_key).encode()).hexdigest()
-    params['w_rid'] = wbi_sign
-    return params
+from bilibili_bot.wbi import enc_wbi, get_mixin_key
 
 
 def parse_cookies_file(filepath: str) -> dict:

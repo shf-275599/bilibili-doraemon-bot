@@ -18,7 +18,9 @@ class DMSource(BaseSource):
 
     def fetch_new_messages(self) -> list[Event]:
         from bilibili_bot.client import BilibiliSession
-        client = BilibiliSession(self.config.cookie.cookies_file, self.config.bot.request_timeout_seconds)
+        from bilibili_bot.cookie_store import CookieStore
+        cookie_store = CookieStore(self.config.cookie.cookies_file)
+        client = BilibiliSession(cookie_store, self.config.bot.request_timeout_seconds)
 
         my_uid = client.get_cookies().get("DedeUserID", "")
         if not my_uid:

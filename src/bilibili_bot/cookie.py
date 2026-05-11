@@ -4,12 +4,15 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from bilibili_bot.state import StateStore
+if TYPE_CHECKING:
+    from bilibili_bot.atomic_state import AtomicStateStore
+    from bilibili_bot.cookie_store import CookieStore
 
 COOKIE_INFO_URL = "https://passport.bilibili.com/x/passport-login/web/cookie/info"
 COOKIE_REFRESH_URL = "https://passport.bilibili.com/x/passport-login/web/cookie/refresh"
@@ -23,6 +26,11 @@ JNrRuoEUXpabUzGB8QIDAQAB
 -----END PUBLIC KEY-----"""
 REFRESH_CSRF_RE = re.compile(r'<div id="1-name">([^<]+)</div>')
 
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
 
 @dataclass
 class CookieHealth:
@@ -34,48 +42,47 @@ class CookieHealth:
 
 
 class CookieRefreshManager:
-    def __init__(self, config, store: StateStore | None = None):
+    def __init__(
+        self,
+        config,
+        cookie_store: CookieStore,
+        atomic_store: AtomicStateStore,
+    ):
         self.config = config
-        self.cookies_file = config.cookie.cookies_file
+        self._cookie_store = cookie_store
+        self._atomic_store = atomic_store
         self.timeout = config.bot.request_timeout_seconds
         self.check_interval_seconds = config.cookie.check_interval_minutes * 60
-        self.store = store
         self._last_check_at = self._load_last_check()
 
     def _load_last_check(self) -> float:
-        if self.store is None:
-            return 0.0
-        state = self.store.load_state()
+        state = self._atomic_store.load_state()
         return state.get("cookie_refresh", {}).get("last_check_at", 0.0)
 
     def _save_last_check(self) -> None:
-        if self.store is None:
-            return
-        state = self.store.load_state()
-        if "cookie_refresh" not in state:
-            state["cookie_refresh"] = {}
-        state["cookie_refresh"]["last_check_at"] = self._last_check_at
-        self.store.save_state(state)
+        self._atomic_store.atomic_getset(
+            "cookie_refresh", "last_check_at", value=self._last_check_at
+        )
 
     def _headers(self) -> dict[str, str]:
-        from bilibili_bot.client import _parse_cookies_file, USER_AGENTS
-        cookies = _parse_cookies_file(self.cookies_file)
-        cookie_header = "; ".join(f"{k}={v}" for k, v in cookies.items())
         return {
-            "User-Agent": USER_AGENTS[0],
+            "User-Agent": USER_AGENT,
             "Referer": "https://www.bilibili.com/",
             "Origin": "https://www.bilibili.com",
             "Accept": "application/json, text/plain, */*",
-            "Cookie": cookie_header,
+            "Cookie": self._cookie_store.get_header(),
         }
 
-    def _cookie_dict(self) -> dict[str, str]:
-        from bilibili_bot.client import _parse_cookies_file
-        return _parse_cookies_file(self.cookies_file)
+    def _get_refresh_token(self) -> str:
+        env_name = self.config.cookie.refresh_token_env
+        token = os.environ.get(env_name, "")
+        if token:
+            return token
+        state = self._atomic_store.load_state()
+        return state.get("cookie_refresh", {}).get("refresh_token", "")
 
     def check_health(self) -> CookieHealth:
-        cookies = self._cookie_dict()
-        bili_jct = cookies.get("bili_jct", "")
+        bili_jct = self._cookie_store.get("bili_jct", "")
         headers = self._headers()
 
         try:
@@ -139,10 +146,10 @@ class CookieRefreshManager:
             status.message = "cookie valid and no refresh required"
             return status
 
-        refresh_env = self.config.cookie.refresh_token_env
-        refresh_token = os.environ.get(refresh_env, "")
+        refresh_token = self._get_refresh_token()
         if not refresh_token:
-            status.message = f"需要刷新，但缺少环境变量 {refresh_env}"
+            env_name = self.config.cookie.refresh_token_env
+            status.message = f"需要刷新，但缺少 {env_name}（环境变量和持久化存储均无）"
             return status
 
         try:
@@ -153,7 +160,7 @@ class CookieRefreshManager:
             new_refresh_token = self._perform_refresh(refresh_csrf, refresh_token)
             self._confirm_refresh(refresh_token)
             status.refreshed = True
-            status.message = f"cookie refresh success; new refresh token={new_refresh_token[:8]}..."
+            status.message = "cookie refresh success"
         except Exception as e:
             status.message = f"刷新失败: {e}"
 
@@ -185,7 +192,7 @@ class CookieRefreshManager:
         return match.group(1)
 
     def _perform_refresh(self, refresh_csrf: str, refresh_token: str) -> str:
-        cookies = self._cookie_dict()
+        cookies = self._cookie_store.get_all()
         headers = self._headers()
         response = requests.post(
             COOKIE_REFRESH_URL,
@@ -202,17 +209,26 @@ class CookieRefreshManager:
         payload = response.json()
 
         if payload.get("code") != 0:
-            raise RuntimeError(f"刷新 Cookie 失败: code={payload.get('code')} message={payload.get('message')}")
+            raise RuntimeError(
+                f"刷新 Cookie 失败: code={payload.get('code')} message={payload.get('message')}"
+            )
 
-        updated = cookies.copy()
+        updated = dict(cookies)
         for key, value in response.cookies.items():
             updated[key] = value
 
-        self._write_cookies(updated)
-        return str(payload.get("data", {}).get("refresh_token", ""))
+        self._cookie_store.write(updated)
+
+        new_token = str(payload.get("data", {}).get("refresh_token", ""))
+        if new_token:
+            self._atomic_store.atomic_getset(
+                "cookie_refresh", "refresh_token", value=new_token
+            )
+
+        return new_token
 
     def _confirm_refresh(self, old_refresh_token: str) -> None:
-        cookies = self._cookie_dict()
+        cookies = self._cookie_store.get_all()
         headers = self._headers()
         response = requests.post(
             COOKIE_CONFIRM_URL,
@@ -227,12 +243,6 @@ class CookieRefreshManager:
         payload = response.json()
 
         if payload.get("code") != 0:
-            raise RuntimeError(f"确认 Cookie 刷新失败: code={payload.get('code')} message={payload.get('message')}")
-
-    def _write_cookies(self, cookies: dict[str, str]) -> None:
-        lines = ["# Netscape HTTP Cookie File\n"]
-        for name, value in cookies.items():
-            lines.append(f".bilibili.com\tTRUE\t/\tFALSE\t0\t{name}\t{value}\n")
-
-        with open(self.cookies_file, "w", encoding="utf-8") as f:
-            f.writelines(lines)
+            raise RuntimeError(
+                f"确认 Cookie 刷新失败: code={payload.get('code')} message={payload.get('message')}"
+            )
