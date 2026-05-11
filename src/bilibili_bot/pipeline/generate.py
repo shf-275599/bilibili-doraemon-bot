@@ -27,14 +27,15 @@ def summarize_conversation(summary_text: str, provider) -> str:
 
 
 def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
-    business_labels = {"video": "视频", "dynamic": "动态", "dynamic_draw": "图文动态"}
+    business_labels = {"video": "视频", "dynamic": "动态", "dynamic_draw": "图文动态", "article": "专栏文章"}
     business_label = business_labels.get(event.business_type, event.business_type)
 
     now = datetime.now(CST)
     parts = [f"当前时间：{now.strftime('%Y年%m月%d日 %H:%M')}", f"来源：{business_label}"]
 
     if event.video_title:
-        label = "动态内容" if event.business_type in ("dynamic", "dynamic_draw") else "内容标题"
+        label_map = {"dynamic": "动态内容", "dynamic_draw": "动态内容", "article": "文章标题"}
+        label = label_map.get(event.business_type, "内容标题")
         parts.append(f"{label}：{event.video_title}")
     if event.bvid and event.business_type == "video":
         parts.append(f"视频BV号：{event.bvid}")

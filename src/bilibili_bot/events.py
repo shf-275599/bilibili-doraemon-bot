@@ -32,7 +32,7 @@ class Event:
         }
 
 
-BUSINESS_TYPE_MAP = {1: "video", 11: "dynamic_draw", 17: "dynamic"}
+BUSINESS_TYPE_MAP = {1: "video", 11: "dynamic_draw", 12: "article", 17: "dynamic"}
 
 
 @dataclass

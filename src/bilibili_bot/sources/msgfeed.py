@@ -94,6 +94,29 @@ class MsgFeedReplySource(BaseSource):
                     owner = info.get("owner", {})
                     event.up_name = owner.get("name", "")
 
+            elif event.business_type == "article":
+                if event.video_title:
+                    continue
+
+                if event.oid not in cache:
+                    try:
+                        resp = client.get(
+                            "https://api.bilibili.com/x/article/view",
+                            params={"id": event.oid},
+                        )
+                        data = resp.json()
+                        if data.get("code") == 0:
+                            cache[event.oid] = data.get("data", {})
+                    except Exception as e:
+                        logger.debug("article_enrich_failed", oid=event.oid, error=str(e))
+
+                info = cache.get(event.oid, {})
+                if info:
+                    event.video_title = info.get("title", "") or ""
+                    summary = info.get("summary", "") or ""
+                    if summary and summary != event.video_title:
+                        event.video_desc = summary[:500]
+
             elif event.business_type in ("dynamic", "dynamic_draw"):
                 uri = (event.raw_payload.get("item", {}) or {}).get("uri", "")
                 if not uri:
