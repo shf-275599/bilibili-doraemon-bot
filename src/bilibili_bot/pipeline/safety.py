@@ -13,7 +13,7 @@ logger = structlog.get_logger()
 PII_PATTERNS = [
     (r"\b1[3-9]\d{9}\b", "手机号"),
     (r"\b\d{17}[\dXx]\b", "身份证号"),
-    (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "邮箱"),
+    (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "邮箱"),
     (r"\b\d{16,19}\b", "银行卡号"),
 ]
 
@@ -37,9 +37,10 @@ class ContentSafetyChecker:
         if self.sensitive_words:
             pattern = "|".join(re.escape(w) for w in self.sensitive_words)
         else:
-            pattern = "(?!x)x"
-        self.sensitive_pattern = re.compile(pattern, re.IGNORECASE)
+            pattern = None
+        self.sensitive_pattern = re.compile(pattern, re.IGNORECASE) if pattern else None
         self.url_pattern = re.compile(r"https?://[^\s]+|www\.[^\s]+", re.IGNORECASE)
+        self._pii_patterns = [(re.compile(p), name) for p, name in PII_PATTERNS]
 
     def check(self, text: str) -> SafetyCheckResult:
         if not text or not text.strip():
@@ -52,7 +53,7 @@ class ContentSafetyChecker:
                 "medium",
             )
 
-        sensitive_matches = self.sensitive_pattern.findall(text)
+        sensitive_matches = self.sensitive_pattern.findall(text) if self.sensitive_pattern else []
         if sensitive_matches:
             return SafetyCheckResult(
                 False,
@@ -70,8 +71,8 @@ class ContentSafetyChecker:
 
         if self.block_pii:
             pii_found = []
-            for pattern, pii_type in PII_PATTERNS:
-                if re.search(pattern, text):
+            for pattern, pii_type in self._pii_patterns:
+                if pattern.search(text):
                     pii_found.append(pii_type)
             if len(pii_found) >= 1:
                 return SafetyCheckResult(

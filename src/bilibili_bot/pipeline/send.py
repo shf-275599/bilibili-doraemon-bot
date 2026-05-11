@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import random
-import time
+import uuid
 
 import structlog
 
@@ -12,10 +11,31 @@ logger = structlog.get_logger()
 
 COMMENT_TYPE_MAP = {"video": 1, "dynamic": 17, "dynamic_draw": 11, "article": 12}
 
+DM_FATAL_CODES = {-101, -403}
+
+
+def _classify_dm_error(code: int) -> tuple[bool, bool]:
+    """返回 (is_success, is_retriable)。"""
+    if code == 0:
+        return True, False
+    if code in DM_FATAL_CODES or str(code).startswith("1205"):
+        return False, False
+    return False, True
+
 
 def send_comment_reply(event: CommentEvent, reply_text: str, client) -> tuple[bool, str, bool]:
-    csrf = client.get_cookies().get("bili_jct", "")
-    params = {
+    csrf = client.get_cookie("bili_jct", "")
+
+    # WBI 签名参数（URL query）
+    query_params = client.sign_wbi({
+        "type": COMMENT_TYPE_MAP.get(event.business_type, 1),
+        "oid": event.oid,
+        "root": event.root_rpid if event.root_rpid and event.root_rpid != "0" else event.rpid,
+        "parent": event.rpid,
+    })
+
+    # 表单数据（POST body）
+    form_data = {
         "type": COMMENT_TYPE_MAP.get(event.business_type, 1),
         "oid": event.oid,
         "root": event.root_rpid if event.root_rpid and event.root_rpid != "0" else event.rpid,
@@ -25,12 +45,11 @@ def send_comment_reply(event: CommentEvent, reply_text: str, client) -> tuple[bo
         "plat": 1,
     }
 
-    signed_params = client.sign_wbi(params)
-
     try:
         resp = client.post(
             "https://api.bilibili.com/x/v2/reply/add",
-            data=signed_params,
+            params=query_params,
+            data=form_data,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -48,8 +67,8 @@ def send_comment_reply(event: CommentEvent, reply_text: str, client) -> tuple[bo
 
 
 def send_dm_reply(event: DMEvent, reply_text: str, client) -> tuple[bool, str, bool]:
-    csrf = client.get_cookies().get("bili_jct", "")
-    sender_uid = client.get_cookies().get("DedeUserID", "")
+    csrf = client.get_cookie("bili_jct", "")
+    sender_uid = client.get_cookie("DedeUserID", "")
     receiver_id = event.talker_id
 
     import json as json_lib
@@ -60,9 +79,9 @@ def send_dm_reply(event: DMEvent, reply_text: str, client) -> tuple[bool, str, b
         "msg[msg_type]": 1,
         "msg[msg_status]": 0,
         "msg[content]": json_lib.dumps({"content": reply_text}),
-        "msg[dev_id]": "B0CB5998-CE3C-4069-8B15-5C4F5B7A3A3D",
+        "msg[dev_id]": str(uuid.uuid4()),
         "msg[new_face_version]": 0,
-        "msg[timestamp]": int(time.time()),
+        "msg[timestamp]": int(__import__("time").time()),
         "from_firework": 0,
         "build": 0,
         "mobi_app": "web",
@@ -70,7 +89,6 @@ def send_dm_reply(event: DMEvent, reply_text: str, client) -> tuple[bool, str, b
         "csrf": csrf,
     }
 
-    # WBI 签名必需（bilibili-api #828: 无签名时 API 返回 code=0 但消息不送达）
     query_params = client.sign_wbi({
         "w_sender_uid": sender_uid,
         "w_receiver_id": receiver_id,
@@ -88,8 +106,13 @@ def send_dm_reply(event: DMEvent, reply_text: str, client) -> tuple[bool, str, b
         if result.get("code") == 0:
             return True, "发送成功", False
 
-        logger.warning("send_dm_raw_response", code=result.get("code"), msg=result.get("msg"), data=data.get("msg[sender_uid]"), receiver=data.get("msg[receiver_id]"))
-        return False, f"发送失败 code={result.get('code')} msg={result.get('msg')}", True
+        _success, retriable = _classify_dm_error(result.get("code", -1))
+        logger.warning(
+            "send_dm_raw_response",
+            code=result.get("code"),
+            msg=result.get("msg"),
+        )
+        return False, f"发送失败 code={result.get('code')} msg={result.get('msg')}", retriable
 
     except Exception as e:
         return False, f"请求异常: {e}", True
@@ -104,8 +127,8 @@ class SendStage(PipelineStage):
             logger.info("dry_run", event_key=event.event_key, reply=context.reply_text[:50])
             context.dedup.mark_replied(event, context.reply_text, f"{context.provider_used}:dry-run", context.tool_calls)
             context.rate_limiter.record_success(user_id=event.author_id, oid=event.target_id)
-            
-            if isinstance(event, CommentEvent) and hasattr(context, 'store') and context.store:
+
+            if isinstance(event, CommentEvent) and context.store:
                 context.store.update_comment_context(
                     video_id=event.oid,
                     user_id=event.author_mid,
@@ -120,7 +143,7 @@ class SendStage(PipelineStage):
                     role="bot",
                     content=context.reply_text,
                 )
-            
+
             return StageResult.CONTINUE
 
         if isinstance(event, CommentEvent):
@@ -135,8 +158,8 @@ class SendStage(PipelineStage):
             logger.info("send_success", event_key=event.event_key)
             context.dedup.mark_replied(event, context.reply_text, context.provider_used, context.tool_calls)
             context.rate_limiter.record_success(user_id=event.author_id, oid=event.target_id)
-            
-            if isinstance(event, CommentEvent) and hasattr(context, 'store') and context.store:
+
+            if isinstance(event, CommentEvent) and context.store:
                 context.store.update_comment_context(
                     video_id=event.oid,
                     user_id=event.author_mid,

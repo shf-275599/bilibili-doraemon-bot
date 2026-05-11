@@ -319,7 +319,7 @@ class MsgFeedReplySource(BaseSource):
             oid=str(item_data.get("subject_id", "")),
             rpid=str(item_data.get("source_id", "")),
             root_rpid=str(item_data.get("root_id", "")),
-            parent_rpid=str(item_data.get("source_id", "")),
+            parent_rpid=str(item_data.get("root_id", "")),
             author_mid=str(user.get("mid", "")),
             author_name=user.get("nickname", ""),
             content_text=item_data.get("source_content", ""),

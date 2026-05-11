@@ -39,9 +39,11 @@ class OwnDynamicCommentSource(BaseSource):
         return events
 
     def _fetch_dynamics(self, client) -> list[dict]:
+        mid = client.get_cookie("DedeUserID", "")
+        params = client.sign_wbi({"host_mid": mid})
         resp = client.get(
             "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space",
-            params={"host_mid": client.get_cookies().get("DedeUserID", "")},
+            params=params,
         )
         resp.raise_for_status()
         data = resp.json()

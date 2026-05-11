@@ -48,9 +48,10 @@ class OwnVideoCommentSource(BaseSource):
         return events
 
     def _fetch_videos(self, client, mid: str) -> list[dict]:
+        params = client.sign_wbi({"mid": mid, "ps": self.video_page_size, "pn": 1})
         resp = client.get(
             "https://api.bilibili.com/x/space/arc/search",
-            params={"mid": mid, "ps": self.video_page_size, "pn": 1},
+            params=params,
         )
         resp.raise_for_status()
         data = resp.json()
