@@ -117,6 +117,9 @@ class MsgFeedReplySource(BaseSource):
         business_id = item_data.get("business_id", 1)
         business_type = BUSINESS_TYPE_MAP.get(business_id, "video")
 
+        # 提取楼中楼上下文：target_reply_content 是用户回复的那条评论
+        target_content = item_data.get("target_reply_content", "")[:200] if item_data.get("target_reply_content") else ""
+
         return CommentEvent(
             source_type="msgfeed",
             event_key=f"{business_type}:{item_data.get('subject_id')}:{item_data.get('source_id')}",
@@ -132,4 +135,5 @@ class MsgFeedReplySource(BaseSource):
             content_text=item_data.get("source_content", ""),
             at_me=True,
             bvid="",
+            parent_content=target_content,
         )
