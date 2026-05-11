@@ -1,6 +1,14 @@
-# Bilibili 评论自动回复机器人 v2
+# Bilibili 评论自动回复机器人 v3
 
 自动监听 Bilibili 评论和私信，使用 DeepSeek V4 Flash 生成 AI 回复的后台守护进程。
+
+**v3 新特性**：
+- **AtomicStateStore** — 原子状态存储，消除全部读-改-写竞态
+- **CookieStore** — mtime 自动重载，替代 lru_cache，刷新 token 持久化
+- **Tool Calling 原生集成** — ProviderManager 自动路由 tools_enabled，Agent 实例缓存
+- **WBI 签名统一** — 单一实现，字符过滤 + key 长度校验
+- **systemd 安全加固** — 10 条安全指令（NoNewPrivileges, ProtectSystem=strict 等）
+- **依赖注入** — CookieStore + AtomicStateStore 注入，可测试可 mock
 
 ## 功能特性
 
@@ -282,11 +290,14 @@ bilibili-bot/
 ├── src/bilibili_bot/          # 源代码
 │   ├── __main__.py           # 入口（daemon 循环 + 主流程）
 │   ├── config.py             # Pydantic 配置（所有配置模型）
-│   ├── client.py             # HTTP 客户端（WBI 签名 + Cookie注入）
+│   ├── client.py             # HTTP 客户端（CookieStore 注入 + 动态 Cookie）
 │   ├── events.py             # 事件模型（CommentEvent / DMEvent）
-│   ├── state.py              # 状态存储（带文件锁，JSONL+JSON）
-│   ├── cookie.py             # Cookie 刷新管理（RSA-OAEP + refresh_csrf）
-│   ├── wbi.py                # WBI 签名算法
+│   ├── state.py              # 状态存储 v2（保留兼容，v3 使用 atomic_state）
+│   ├── atomic_state.py       # [v3] 原子状态存储（双重锁，消除竞态）
+│   ├── cookie_store.py       # [v3] Cookie 存储（mtime 自动重载）
+│   ├── protocols.py          # [v3] 类型化服务接口
+│   ├── cookie.py             # Cookie 刷新管理（RSA-OAEP + refresh_csrf + token 持久化）
+│   ├── wbi.py                # [v3] 统一 WBI 签名算法
 │   ├── log.py                # 结构化日志配置（structlog）
 │   ├── stats.py              # 每日统计报告生成
 │   ├── auto_skip.py          # 已知问题用户自动跳过
@@ -297,25 +308,25 @@ bilibili-bot/
 │   │   ├── filter.py         # 过滤（自己/空/黑名单/纯颜文字/过短/仅关注）
 │   │   ├── rate_limit.py     # 频控 + 熔断（小时/日/用户/OID 多维度）
 │   │   ├── generate.py       # AI 生成（PydanticAI Agent + Provider 降级）
-│   │   ├── safety.py         # 内容安全审查（敏感词/PII/链接/长度）
-│   │   └── send.py           # 发送（评论 WBI + 私信 WBI 签名）
+│   │   ├── safety.py         # 内容安全审查（PII 预编译 + 敏感词）
+│   │   └── send.py           # 发送（WBI 签名修复 + DM 错误分类 + dev_id 随机化）
 │   ├── providers/            # AI Provider
 │   │   ├── base.py           # Provider ABC + ReplyResult
-│   │   ├── openai_compat.py  # OpenAI 兼容 Provider（generate + PydanticAI Agent 桥接）
-│   │   └── manager.py        # Provider 管理
+│   │   ├── openai_compat.py  # OpenAI 兼容 Provider（generate + PydanticAI Agent）
+│   │   └── manager.py        # [v3] Provider 管理（tools_enabled 路由 + Agent 缓存）
 │   ├── tools/                # PydanticAI Tool 工具系统
-│   │   ├── __init__.py       # Tool 定义 + 实现（PydanticAI Tool 包装器）
+│   │   ├── __init__.py       # Tool 定义 + 实现（线程安全锁）
 │   │   ├── transcribe.py     # Whisper 语音转录（yt-dlp + faster-whisper）
 │   │   └── web_search.py     # 联网搜索（Tavily + DuckDuckGo 降级）
 │   └── sources/              # 数据来源
 │       ├── base.py           # Source ABC
-│       ├── msgfeed.py        # 消息通知回复 + bvid 补充 + 用户画像
+│       ├── msgfeed.py        # 消息通知回复 + bvid + 用户画像 + parent_rpid 修复
 │       ├── mention.py        # @我消息（复用 msgfeed enrich 逻辑）
-│       ├── own_video.py      # 自己视频评论（带重试）
-│       ├── own_dynamic.py    # 自己动态评论（视频/图文）
+│       ├── own_video.py      # 自己视频评论（WBI 签名 + 重试）
+│       ├── own_dynamic.py    # 自己动态评论（WBI 签名）
 │       └── dm.py             # 私信（会话列表 + 历史消息 + 分享解析）
 ├── scripts/                  # 辅助脚本
-│   └── bilibili_wbi.py       # WBI 签名 + AI 摘要 + 用户信息 + 用户搜索
+│   └── bilibili_wbi.py       # [v3] 从包导入 WBI + AI 摘要 + 用户信息
 ├── models/whisper/           # Whisper 模型（gitignored）
 ├── config/                   # 配置文件
 │   ├── system-prompt.txt     # 角色 Prompt（独立维护）
@@ -323,8 +334,8 @@ bilibili-bot/
 │   ├── bilibili-cookies.txt  # B站 Cookie（Netscape 格式，gitignored）
 │   └── bilibili-cookies.example.txt
 ├── data/                     # 运行时数据（gitignored）
-├── tests/                    # 单元测试（31 个）
-├── bilibot.service           # systemd 服务文件
+├── tests/                    # 单元测试（115 个，覆盖率 33%）
+├── bilibot.service           # [v3] systemd 服务（10 条安全指令）
 ├── pyproject.toml
 └── README.md
 ```
@@ -375,10 +386,9 @@ TOOLS = [
 ]
 ```
 
-**PydanticAI vs 旧方案**：
-- 旧：手写 ~60 行 tool calling 循环（`openai_compat.py` 的 `generate_with_tools`），手动管理 messages、tool_calls 解析、reasoning_content 回传、迭代控制
-- 新：PydanticAI `Agent` 一行 `agent.run_sync()` 完成规划-执行-输出全流程，内置 OpenAI-compatible HTTP 客户端，原生支持 DeepSeek V4 Flash
-- 降级：Agent 异常时自动降级为 `ProviderManager.generate_reply()`（纯 LLM 回复，无工具）
+**PydanticAI Agent 原生集成**（v3）：
+- `ProviderManager.generate_reply()` 根据 `tools_enabled` 自动路由
+- Agent 实例按 `system_prompt` hash 缓存，避免重复创建
 
 ### 事件模型
 
