@@ -1,16 +1,16 @@
 """PydanticAI Tool 定义测试。"""
-from bilibili_bot.tools import TOOLS, get_video_content, search_web
+from bilibili_bot.tools import TOOLS, get_video_content, get_content, search_web
 
 
-def test_tools_list_contains_two():
-    """TOOLS 列表包含两个工具。"""
-    assert len(TOOLS) == 2
+def test_tools_list_contains_three():
+    """TOOLS 列表包含三个工具。"""
+    assert len(TOOLS) == 3
 
 
 def test_tool_names_match():
     """工具名称正确。"""
     names = {t.name for t in TOOLS}
-    assert names == {"get_video_content", "search_web"}
+    assert names == {"get_video_content", "get_content", "search_web"}
 
 
 def test_get_video_content_has_correct_name():

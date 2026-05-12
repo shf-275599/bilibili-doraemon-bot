@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 
+import requests
 import structlog
 from pydantic_ai import Tool
 
@@ -142,6 +143,120 @@ def _search_web(query: str) -> str:
         return "搜索功能不可用"
 
 
+def _get_content(content_type: str, content_id: str) -> str:
+    """获取B站动态或专栏的完整内容。"""
+    if not content_type or not content_id:
+        return "错误：未提供内容类型或ID"
+
+    if content_type == "dynamic":
+        return _get_dynamic_content(content_id)
+    elif content_type == "article":
+        return _get_article_content(content_id)
+    else:
+        return f"不支持的内容类型: {content_type}，可选 dynamic/article"
+
+
+def _get_dynamic_content(dynamic_id: str) -> str:
+    try:
+        resp = requests.get(
+            "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail",
+            params={"id": dynamic_id, "timezone_offset": -480},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("code") != 0:
+            return f"获取动态失败: {data.get('message', '未知错误')}"
+
+        item = (data.get("data", {}) or {}).get("item", {}) or {}
+        modules = item.get("modules", {}) or {}
+
+        if isinstance(modules, list):
+            return _extract_opus_text_from_modules(modules)
+
+        dyn = modules.get("module_dynamic", {}) or {}
+        desc = dyn.get("desc", {}) or {}
+        text = desc.get("text", "") or ""
+
+        if not text and item.get("type") == "DYNAMIC_TYPE_FORWARD":
+            orig = item.get("orig", {}) or {}
+            om = orig.get("modules", {}) or {}
+            om_dyn = om.get("module_dynamic", {}) or {}
+            om_desc = om_dyn.get("desc", {}) or {}
+            text = om_desc.get("text", "") or ""
+
+        if not text:
+            return "该动态没有文字内容"
+
+        draw = dyn.get("major", {}) or {}
+        draw_items = draw.get("draw", {}) or {}
+        items_list = draw_items.get("items", []) or []
+        img_count = len(items_list)
+
+        result = text[:3000]
+        if img_count:
+            result += f"\n\n（该动态包含 {img_count} 张图片）"
+        return result
+
+    except Exception as e:
+        return f"获取动态内容失败: {e}"
+
+
+def _get_article_content(article_id: str) -> str:
+    try:
+        resp = requests.get(
+            "https://api.bilibili.com/x/article/view",
+            params={"id": article_id},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("code") != 0:
+            return f"获取文章失败: {data.get('message', '未知错误')}"
+
+        article = data.get("data", {}) or {}
+        title = article.get("title", "")
+        summary = article.get("summary", "")
+        content = article.get("content", "")
+
+        import re
+        content_text = re.sub(r"<[^>]+>", "", content)[:3000] if content else ""
+
+        parts = []
+        if title:
+            parts.append(f"标题：{title}")
+        if summary:
+            parts.append(f"摘要：{summary[:500]}")
+        if content_text:
+            parts.append(f"正文：{content_text}")
+
+        img_urls = article.get("image_urls", []) or []
+        if img_urls:
+            parts.append(f"\n（该文章包含 {len(img_urls)} 张图片）")
+
+        return "\n\n".join(parts) if parts else "该文章没有内容"
+
+    except Exception as e:
+        return f"获取文章内容失败: {e}"
+
+
+def _extract_opus_text_from_modules(modules: list) -> str:
+    for mod in modules:
+        if mod.get("module_type") == "MODULE_TYPE_CONTENT":
+            content = mod.get("module_content", {}) or {}
+            paragraphs = content.get("paragraphs", []) or []
+            parts = []
+            for para in paragraphs:
+                text_node = para.get("text", {}) or {}
+                for node in text_node.get("nodes", []) or []:
+                    word = node.get("word", {}) or {}
+                    w = word.get("words", "")
+                    if w:
+                        parts.append(w)
+            return "".join(parts)[:3000]
+    return "该动态没有文字内容"
+
+
 # ── PydanticAI Tool 定义 ──
 
 def get_video_content(bvid: str) -> str:
@@ -149,6 +264,15 @@ def get_video_content(bvid: str) -> str:
     当用户询问'这个视频讲了什么'、'视频内容'或需要了解视频时调用。
     """
     return _get_video_content(bvid)
+
+
+def get_content(content_type: str, content_id: str) -> str:
+    """获取B站动态或专栏的完整文字内容。当用户在动态/专栏评论区@bot，
+    需要了解动态/文章具体内容时调用。
+    content_type: 'dynamic' 或 'article'
+    content_id: 动态ID或文章ID
+    """
+    return _get_content(content_type, content_id)
 
 
 def search_web(query: str) -> str:
@@ -160,5 +284,6 @@ def search_web(query: str) -> str:
 
 TOOLS = [
     Tool(_with_tool_logging(get_video_content)),
+    Tool(_with_tool_logging(get_content)),
     Tool(_with_tool_logging(search_web)),
 ]
