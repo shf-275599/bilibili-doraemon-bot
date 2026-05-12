@@ -295,8 +295,6 @@ bilibili-bot/
 │   ├── events.py             # 事件模型（CommentEvent / DMEvent）
 │   ├── atomic_state.py       # [v3] 原子状态存储（双重锁，消除竞态）
 │   ├── cookie_store.py       # [v3] Cookie 存储（mtime 自动重载）
-│   ├── protocols.py          # [v3] 类型化服务接口
-│   ├── protocols.py          # [v3] 类型化服务接口
 │   ├── cookie.py             # Cookie 刷新管理（RSA-OAEP + refresh_csrf + token 持久化）
 │   ├── wbi.py                # [v3] 统一 WBI 签名算法
 │   ├── log.py                # 结构化日志配置（structlog）
@@ -312,8 +310,7 @@ bilibili-bot/
 │   │   ├── safety.py         # 内容安全审查（PII 预编译 + 敏感词）
 │   │   └── send.py           # 发送（WBI 签名修复 + DM 错误分类 + dev_id 随机化）
 │   ├── providers/            # AI Provider
-│   │   ├── base.py           # Provider ABC + ReplyResult
-│   │   └── manager.py        # [v3] Provider 管理（会话级 Agent 缓存 + 历史裁剪）
+│   │   ├── manager.py        # [v3] Provider 管理 + Agent 工厂（会话级缓存）
 │   ├── tools/                # PydanticAI Tool 工具系统
 │   │   ├── __init__.py       # Tool 定义 + 实现（线程安全锁）
 │   │   ├── transcribe.py     # Whisper 语音转录（yt-dlp + faster-whisper）
@@ -578,13 +575,13 @@ result = agent.run_sync('回复你好')
 print(result.output[:50])
 "
 
-# 验证 openai_compat Provider 生成
+# 验证 PydanticAI Agent 生成
 .venv/bin/python3 -c "
 from bilibili_bot.config import BotConfig
-from bilibili_bot.providers.openai_compat import OpenAICompatibleProvider
+from bilibili_bot.providers.manager import ProviderManager
 c = BotConfig.from_toml('config/bot-config.toml')
-p = OpenAICompatibleProvider('t', c.ai.providers['deepseek'].model_dump(), c)
-r = p.generate([{'role':'user','content':'回复你好'}])
+p = ProviderManager(c)
+r = p.chat('test', c.reply.system_prompt, '主人 发来私信：回复你好')
 print(f'success={r.success} text={r.text[:50]}')
 "
 
