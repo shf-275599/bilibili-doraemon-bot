@@ -320,6 +320,10 @@ class AtomicStateStore:
 
     # ── 回复历史 ──
 
+    def append_processed(self, record: dict[str, Any]) -> None:
+        """追加去重记录（兼容 DedupService.mark_replied 调用）。"""
+        self._append_processed(record)
+
     def append_history(self, record: dict[str, Any]) -> None:
         """追加回复历史。"""
         self._append_history(record)
