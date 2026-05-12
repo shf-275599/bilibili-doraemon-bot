@@ -120,13 +120,17 @@ def create_dm_pipeline() -> Pipeline:
     ])
 
 
-def run_once(config: BotConfig, dry_run: bool = False) -> None:
-    cookie_store = CookieStore(config.cookie.cookies_file)
+def run_once(config: BotConfig, dry_run: bool = False,
+             providers: ProviderManager = None,
+             cookie_store: CookieStore = None) -> None:
+    if cookie_store is None:
+        cookie_store = CookieStore(config.cookie.cookies_file)
     client = BilibiliSession(cookie_store, config.bot.request_timeout_seconds)
     atomic_store = AtomicStateStore()
     dedup = DedupService(atomic_store)
     rate_limiter = RateController(config, atomic_store)
-    providers = ProviderManager(config)
+    if providers is None:
+        providers = ProviderManager(config)
     cookie_manager = CookieRefreshManager(config, cookie_store, atomic_store)
     auto_skip_tracker = AutoSkipTracker(atomic_store)
 
@@ -271,6 +275,7 @@ def main() -> int:
         return 0
 
     cookie_store = CookieStore(config.cookie.cookies_file)
+    providers = ProviderManager(config)  # 只创建一次，保持会话
     shutdown_event = threading.Event()
 
     def handle_signal(signum, frame):
@@ -284,7 +289,8 @@ def main() -> int:
 
     while not shutdown_event.is_set():
         try:
-            run_once(config, dry_run=args.dry_run)
+            run_once(config, dry_run=args.dry_run,
+                     providers=providers, cookie_store=cookie_store)
         except Exception as e:
             logger.error("daemon_error", error=str(e))
 
