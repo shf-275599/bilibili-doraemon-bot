@@ -26,6 +26,7 @@ logger = structlog.get_logger()
 
 SESSION_TTL = 3600
 MAX_SESSIONS = 500
+HISTORY_MAX = 40
 
 
 class ProviderManager:
@@ -68,6 +69,7 @@ class ProviderManager:
                 message_history=session.history,
             )
             session.history = result.all_messages()
+            _trim_history(session)
             return _agent_result_to_reply(result, self.primary_name)
         except Exception as e:
             logger.warning("agent_chat_failed", error=str(e), session=session_key)
@@ -122,3 +124,12 @@ class _AgentSession:
 
     def touch(self) -> None:
         self.last_used = time.time()
+
+
+def _trim_history(session: _AgentSession) -> None:
+    """裁剪历史到最近 HISTORY_MAX 条，避免 token 无限增长。"""
+    if len(session.history) <= HISTORY_MAX:
+        return
+    # 保留第一条（system prompt）和最近 30 条
+    keep = min(HISTORY_MAX - 1, 30)
+    session.history = [session.history[0]] + session.history[-keep:]
