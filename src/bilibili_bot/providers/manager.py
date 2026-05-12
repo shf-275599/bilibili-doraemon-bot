@@ -60,6 +60,11 @@ class ProviderManager:
         session.touch()
 
         try:
+            # 将最近3轮对话作为上下文提示追加到用户消息
+            context_hint = _build_context_hint(session.history)
+            if context_hint:
+                user_message = f"{user_message}\n\n[最近对话: {context_hint}]"
+
             result = session.agent.run_sync(
                 user_prompt=user_message,
                 message_history=session.history,
@@ -171,3 +176,20 @@ class _AgentSession:
 
     def touch(self) -> None:
         self.last_used = time.time()
+
+
+def _build_context_hint(history: list) -> str:
+    """从历史中提取最近对话文本，作为上下文提示。"""
+    if len(history) < 2:
+        return ""
+    parts = []
+    for msg in history[-6:]:
+        try:
+            for part in msg.parts:
+                content = getattr(part, 'content', '') or str(part)
+                if content and len(content) > 2:
+                    parts.append(content[:120])
+                    break
+        except Exception:
+            pass
+    return " | ".join(parts[-4:])
