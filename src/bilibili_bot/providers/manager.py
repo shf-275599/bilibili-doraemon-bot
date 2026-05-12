@@ -111,7 +111,7 @@ class ProviderManager:
         if len(session.history) <= HISTORY_MAX:
             return
 
-        keep = 20
+        keep = 25
         old_msgs = session.history[1:-keep]  # 跳过 system_prompt，保留最近 keep 条
         if len(old_msgs) <= 1:
             return
@@ -148,11 +148,11 @@ class ProviderManager:
 
         try:
             result = self.primary.generate([
-                {"role": "system", "content": "用一句中文总结以下对话的核心话题和关键信息："},
+                {"role": "system", "content": "用3-5句中文总结以下对话，列出每个被讨论过的话题（如GPT-5.5、恐怖片推荐、喜剧电影、天气等）和关键信息："},
                 {"role": "user", "content": text},
             ])
             if result.success and result.text:
-                return result.text[:200]
+                return result.text[:500]
         except Exception as e:
             logger.debug("history_summary_failed", error=str(e))
         return ""
