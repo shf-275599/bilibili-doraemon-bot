@@ -215,13 +215,6 @@ def run_once(config: BotConfig, dry_run: bool = False) -> None:
             logger.info("source_fetched", source=source_name, count=len(events))
 
             for event in events:
-                if hasattr(event, 'oid') and hasattr(event, 'author_mid'):
-                    comment_context = atomic_store.get_comment_context(event.oid, event.author_mid)
-                    if comment_context:
-                        event.recent_replies = comment_context.get("recent_replies", [])
-                        event.conversation_summary = comment_context.get("conversation_summary", "")
-                        event.interaction_count = len(comment_context.get("recent_replies", []))
-                
                 comment_pipeline.run(event, context)
 
         except Exception as e:

@@ -55,8 +55,6 @@ class DMSource(BaseSource):
                 messages = [m for m in messages if isinstance(m, dict)]
                 logger.debug("dm_messages_fetched", talker_id=talker_id, count=len(messages))
 
-                recent, summary = _build_recent_history(messages, my_uid)
-
                 for msg in messages:
                     sender_uid = msg.get("sender_uid", 0)
                     if str(sender_uid) == my_uid:
@@ -65,9 +63,6 @@ class DMSource(BaseSource):
                     event = self._normalize_message(msg, session, my_uid)
                     if event is None:
                         continue
-
-                    event.recent_messages = recent
-                    event.conversation_summary = summary or ""
 
                     logger.info(
                         "dm_event_found",
@@ -154,61 +149,3 @@ class DMSource(BaseSource):
         )
 
 
-def _build_recent_history(messages: list, my_uid: str) -> tuple[list[dict], str | None]:
-    """返回 (recent, summary_text)。超过 20 条时 summary_text 包含最老 15 条的格式化文本。"""
-    recent = []
-    for msg in reversed(messages):
-        if not isinstance(msg, dict):
-            continue
-        sender = str(msg.get("sender_uid", 0))
-        msg_type = msg.get("msg_type", 0)
-        content_str = msg.get("content", "{}")
-
-        if msg_type == 7:
-            # B站视频/动态分享：提取 title + bvid 注入上下文
-            try:
-                import json as _json
-                share_data = _json.loads(content_str)
-                if isinstance(share_data, dict):
-                    bvid = share_data.get("bvid", "")
-                    title = share_data.get("title", "")
-                    author_name = share_data.get("author", "")
-                    if bvid and title:
-                        text = f"[分享了视频：《{title}》({bvid})，UP主：{author_name}]" if author_name else f"[分享了视频：《{title}》({bvid})]"
-                    elif bvid:
-                        text = f"[分享了视频 {bvid}]"
-                    else:
-                        text = "[分享了视频]"
-                else:
-                    text = "[分享了视频]"
-            except Exception:
-                text = "[分享了视频]"
-        else:
-            try:
-                import json as _json2
-                content_data = _json2.loads(content_str)
-                if isinstance(content_data, dict):
-                    text = content_data.get("content", "")
-                else:
-                    text = str(content_data)
-            except Exception:
-                text = str(content_str)
-
-        if text.strip() and not text.startswith("📊 今日报告"):
-            recent.append({
-                "role": "bot" if sender == my_uid else "user",
-                "content": text[:200],
-            })
-
-    recent.reverse()  # 转为正序（最老在前），LLM 按时间顺序理解
-
-    summary_text = None
-    if len(recent) > 30:
-        oldest_15 = recent[:15]  # 取最老的 15 条（正序后前 15 条即最老）
-        lines = []
-        for item in oldest_15:
-            role_label = "我" if item["role"] == "bot" else "对方"
-            lines.append(f"{role_label}: {item['content']}")
-        summary_text = "\n".join(lines)
-
-    return recent, summary_text

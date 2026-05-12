@@ -5,7 +5,6 @@ import os
 import requests
 import structlog
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
@@ -15,28 +14,6 @@ from bilibili_bot.providers.base import BaseProvider, ReplyResult
 from bilibili_bot.tools import TOOLS
 
 logger = structlog.get_logger()
-
-
-def _messages_to_agent_input(messages: list[dict[str, str]]) -> tuple[str, list[ModelRequest | ModelResponse] | None]:
-    """将 openai_compat 消息格式转为 PydanticAI 的 (user_prompt, message_history)。
-
-    messages[0] = system prompt（由 Agent 单独设置）
-    messages[-1] = 当前用户输入
-    messages[1:-1] = 对话历史
-    """
-    if not messages:
-        return "", None
-
-    user_prompt = messages[-1].get("content", "")
-    history: list[ModelRequest | ModelResponse] = []
-    for msg in messages[1:-1]:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        if role == "user":
-            history.append(ModelRequest(parts=[UserPromptPart(content=content)]))
-        elif role == "assistant":
-            history.append(ModelResponse(parts=[TextPart(content=content)]))
-    return user_prompt, history if history else None
 
 
 def _agent_result_to_reply(result, provider_name: str) -> ReplyResult:
@@ -148,30 +125,3 @@ class OpenAICompatibleProvider(BaseProvider):
             )
 
         return ReplyResult(True, text=text, provider=self.name, raw=data)
-
-    def generate_with_tools(self, messages: list[dict[str, str]]) -> ReplyResult:
-        """使用 PydanticAI Agent 进行带工具调用的回复生成。"""
-        if not messages:
-            return ReplyResult(False, provider=self.name, error="空消息")
-
-        system_prompt = messages[0].get("content", "") if messages else ""
-        agent = _create_pydantic_agent(system_prompt, self.global_config, self.name)
-
-        user_prompt, message_history = _messages_to_agent_input(messages)
-
-        try:
-            result = agent.run_sync(
-                user_prompt=user_prompt,
-                message_history=message_history,
-                model_settings=ModelSettings(
-                    temperature=self.global_config.reply.temperature,
-                    max_tokens=self.global_config.reply.max_tokens,
-                    timeout=self.global_config.ai.timeout_seconds,
-                ),
-                usage_limits=UsageLimits(
-                    request_limit=self.global_config.ai.tool_max_iterations + 1,
-                ),
-            )
-            return _agent_result_to_reply(result, self.name)
-        except Exception as e:
-            return ReplyResult(False, provider=self.name, error=f"Agent 执行失败: {e}", retriable=True)

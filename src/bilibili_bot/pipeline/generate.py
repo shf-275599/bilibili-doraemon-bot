@@ -1,3 +1,9 @@
+"""AI 生成阶段 — 构建消息并调用 ProviderManager。
+
+v3 Agent 重构: 不再手动拼接历史消息。Agent 内部维护对话历史。
+只需构建当前消息的上下文，Agent 通过 session_key 自动关联历史。
+"""
+
 from __future__ import annotations
 
 import structlog
@@ -11,132 +17,89 @@ CST = timezone(timedelta(hours=8))
 logger = structlog.get_logger()
 
 
-def summarize_conversation(summary_text: str, provider) -> str:
-    """调用 LLM 生成对话摘要，失败时返回空字符串。"""
-    try:
-        messages = [
-            {"role": "system", "content": "你是一个对话摘要助手。用2-3句中文简洁总结以下对话的核心内容、用户关注的话题、以及你的回复方向。"},
-            {"role": "user", "content": f"对话历史:\n{summary_text}"},
-        ]
-        result = provider.generate(messages)
-        if result.success and result.text:
-            return result.text[:300]
-    except Exception as e:
-        logger.warning("summarize_failed", error=str(e))
-    return ""
-
-
-def build_comment_messages(event: CommentEvent, config) -> list[dict[str, str]]:
-    business_labels = {"video": "视频", "dynamic": "动态", "dynamic_draw": "图文动态", "article": "专栏文章"}
+def _build_comment_prompt(event: CommentEvent) -> str:
+    """构建单条评论的上下文 prompt（不含历史，Agent 管理历史）。"""
+    business_labels = {
+        "video": "视频", "dynamic": "动态",
+        "dynamic_draw": "图文动态", "article": "专栏文章",
+    }
     business_label = business_labels.get(event.business_type, event.business_type)
 
     now = datetime.now(CST)
-    parts = [f"当前时间：{now.strftime('%Y年%m月%d日 %H:%M')}", f"来源：{business_label}"]
+    parts = [f"时间：{now.strftime('%m月%d日 %H:%M')} | 来源：{business_label}"]
 
     if event.video_title:
         label_map = {"dynamic": "动态内容", "dynamic_draw": "动态内容", "article": "文章标题"}
         label = label_map.get(event.business_type, "内容标题")
         parts.append(f"{label}：{event.video_title}")
         if event.images:
-            if event.business_type == "article":
-                parts.append(f"文章配图：共 {len(event.images)} 张图片")
-            elif event.business_type in ("dynamic", "dynamic_draw"):
-                parts.append(f"动态图片：共 {len(event.images)} 张图片")
+            img_label = "文章配图" if event.business_type == "article" else "动态图片"
+            parts.append(f"{img_label}：共 {len(event.images)} 张")
     elif event.images:
-        if event.business_type == "article":
-            parts.append(f"文章内容：这是一篇专栏文章（包含 {len(event.images)} 张配图）")
-        else:
-            parts.append(f"动态内容：这是一条图文动态（包含 {len(event.images)} 张图片）")
-    if event.bvid and event.business_type == "video":
-        parts.append(f"视频BV号：{event.bvid}")
+        type_label = "专栏文章" if event.business_type == "article" else "图文动态"
+        parts.append(f"{type_label}，包含 {len(event.images)} 张图片")
+
+    if event.bvid:
+        parts.append(f"BV号：{event.bvid}")
     if event.video_desc:
-        desc_label = "文章摘要" if event.business_type == "article" else "视频简介"
+        desc_label = "文章摘要" if event.business_type == "article" else "简介"
         parts.append(f"{desc_label}：{event.video_desc}")
-    if event.thread_context:
-        parts.append(f"对话上下文：{event.thread_context}")
-    if event.author_follower:
-        parts.append("注：对方是你的粉丝")
-
-    if event.author_level > 0:
-        parts.append(f"用户等级：Lv{event.author_level}")
-    if event.author_fans_count > 0:
-        parts.append(f"粉丝数：{event.author_fans_count}")
-    if event.interaction_count > 0:
-        parts.append(f"历史互动次数：{event.interaction_count}")
-
-    if event.video_view_count > 0:
-        parts.append(f"视频播放量：{event.video_view_count}")
-    if event.video_like_count > 0:
-        parts.append(f"视频点赞数：{event.video_like_count}")
-    if event.video_favorite_count > 0:
-        parts.append(f"视频收藏数：{event.video_favorite_count}")
     if event.up_name:
         parts.append(f"UP主：{event.up_name}")
 
-    if event.conversation_summary:
-        parts.append(f"对话背景摘要：{event.conversation_summary}")
-    if event.recent_replies:
-        parts.append("历史对话：")
-        for hist in event.recent_replies[-10:]:
-            role_label = "我" if hist["role"] == "bot" else "对方"
-            parts.append(f"  {role_label}：{hist['content'][:100]}")
-
+    if event.thread_context:
+        parts.append(f"\n对话上下文：{event.thread_context}")
     if event.parent_content:
         parts.append(f"被回复的评论：{event.parent_content}")
 
-    parts.append(f"是否@我：{'是' if event.at_me else '否'}")
-    parts.append(f"评论作者：{event.author_name}")
-    parts.append(f"评论内容：{event.content_text}")
-    parts.append("")
-    parts.append("请直接生成一条适合在B站公开回复的中文回复。")
+    if event.author_follower:
+        parts.append("对方是你的粉丝")
+    if event.author_level > 0:
+        parts.append(f"对方等级：Lv{event.author_level}")
 
-    return [
-        {"role": "system", "content": config.reply.system_prompt},
-        {"role": "user", "content": "\n".join(parts)},
-    ]
+    parts.append(f"\n{event.author_name} 说：{event.content_text}")
+    return "\n".join(parts)
 
 
-def build_dm_messages(event: DMEvent, config) -> list[dict[str, str]]:
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": config.reply.system_prompt},
-    ]
-
-    has_summary = bool(event.conversation_summary)
-
-    if event.recent_messages:
-        for hist in event.recent_messages[-15:]:
-            messages.append({"role": "user" if hist["role"] == "user" else "assistant", "content": hist["content"]})
-
+def _build_dm_prompt(event: DMEvent) -> str:
+    """构建单条私信的上下文 prompt（不含历史，Agent 管理历史）。"""
     now = datetime.now(CST)
-    current_content = f"当前时间：{now.strftime('%Y年%m月%d日 %H:%M')}\n用户 {event.talker_name} 发来最新私信：{event.content}"
+    return (
+        f"时间：{now.strftime('%m月%d日 %H:%M')}\n"
+        f"{event.talker_name} 发来私信：{event.content}"
+    )
 
-    # 当有摘要但最近消息中可能缺少上下文时，追加提示
-    if has_summary:
-        current_content += f"\n\n（你和他之前的对话摘要：{event.conversation_summary}。如果他的消息看起来在延续之前的话题，请结合摘要理解他的意图。）"
 
-    messages.append({"role": "user", "content": current_content})
-
-    return messages
+def _make_session_key(event: Event) -> str:
+    """生成 Agent 会话 key。DM: talker_id, 评论: {type}:{oid}:{mid}"""
+    if isinstance(event, DMEvent):
+        return f"dm:{event.talker_id}"
+    return f"{event.source_type}:{event.target_id}:{event.author_id}"
 
 
 class AIGenerateStage(PipelineStage):
     def process(self, event: Event, context: PipelineContext) -> StageResult:
+        system_prompt = context.config.reply.system_prompt
+
         if isinstance(event, CommentEvent):
-            messages = build_comment_messages(event, context.config)
+            user_message = _build_comment_prompt(event)
         elif isinstance(event, DMEvent):
-            if event.conversation_summary and len(event.recent_messages) > 15:
-                event.conversation_summary = summarize_conversation(
-                    event.conversation_summary, context.providers.primary
-                )
-            messages = build_dm_messages(event, context.config)
+            user_message = _build_dm_prompt(event)
         else:
-            logger.error("unknown_event_type", event_type=type(event).__name__)
             return StageResult.SKIP
 
-        reply = context.providers.generate_reply(messages)
+        session_key = _make_session_key(event)
+        use_tools = context.config.ai.tools_enabled
+
+        reply = context.providers.chat(
+            session_key=session_key,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            use_tools=use_tools,
+        )
 
         if not reply.success:
-            logger.error("generate_failed", event_key=event.event_key, error=reply.error)
+            logger.error("generate_failed", key=event.event_key, error=reply.error)
             context.dedup.mark_failed(event, reply.error, reply.provider)
             context.rate_limiter.record_failure(reply.retriable)
             return StageResult.HALT
