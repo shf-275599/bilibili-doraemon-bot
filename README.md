@@ -1,15 +1,11 @@
-# Bilibili 评论自动回复机器人 v3
+# Bilibili 评论自动回复机器人 v4
 
 自动监听 Bilibili 评论和私信，使用 DeepSeek V4 Flash 生成 AI 回复的后台守护进程。
 
-**v3 新特性**：
-- **Agent 会话管理** — PydanticAI Agent 按会话（DM/评论）维护独立上下文，自动关联历史
-- **AtomicStateStore** — 原子状态存储，消除全部读-改-写竞态
-- **CookieStore** — mtime 自动重载，替代 lru_cache，刷新 token 持久化
-- **Tool Calling 原生集成** — ProviderManager 会话级路由，Agent 实例缓存
-- **WBI 签名统一** — 单一实现，字符过滤 + key 长度校验
-- **systemd 安全加固** — 10 条安全指令（NoNewPrivileges, ProtectSystem=strict 等）
-- **代码精简** — 删除 state.py、_build_recent_history、_messages_to_agent_input 等 ~350 行死代码
+**v4 新特性**：
+- **Agent 会话管理** — PydanticAI Agent 按会话维护上下文，裁剪/过期自动 LLM 摘要
+- **摘要持久化** — 会话过期或裁剪时生成的摘要存入磁盘，重启不丢失
+- **可配 TTL/阈值** — 会话过期时间和裁剪上限可在 config.toml 中调整
 
 ## 功能特性
 
@@ -282,7 +278,7 @@ Bot 自动调用 `get_video_content` 工具：
 | `feedback.jsonl` | JSONL | 回复质量反馈数据（点赞数、回复数） | ✅ 可以删除，只影响质量统计 | 每 6 小时检查一次，保留最近 7 天数据 |
 
 > 上下文富化用的数据（视频标题、父评论、私信历史）**不存储在任何文件中**，每次从 B站 API 实时获取，用完即弃。
-> **v3**：评论和私信的对话上下文由 PydanticAI Agent 在内存中管理，不持久化到磁盘。
+> **v4**：会话过期/裁剪时自动 LLM 摘要，摘要持久化到 bot-state.json，重启可恢复。
 
 ## 目录结构
 
@@ -293,10 +289,10 @@ bilibili-bot/
 │   ├── config.py             # Pydantic 配置（所有配置模型）
 │   ├── client.py             # HTTP 客户端（CookieStore 注入 + 动态 Cookie）
 │   ├── events.py             # 事件模型（CommentEvent / DMEvent）
-│   ├── atomic_state.py       # [v3] 原子状态存储（双重锁，消除竞态）
-│   ├── cookie_store.py       # [v3] Cookie 存储（mtime 自动重载）
+│   ├── atomic_state.py       # 原子状态存储（双重锁，消除竞态）
+│   ├── cookie_store.py       # Cookie 存储（mtime 自动重载）
 │   ├── cookie.py             # Cookie 刷新管理（RSA-OAEP + refresh_csrf + token 持久化）
-│   ├── wbi.py                # [v3] 统一 WBI 签名算法
+│   ├── wbi.py                # 统一 WBI 签名算法
 │   ├── log.py                # 结构化日志配置（structlog）
 │   ├── stats.py              # 每日统计报告生成
 │   ├── auto_skip.py          # 已知问题用户自动跳过
@@ -310,7 +306,7 @@ bilibili-bot/
 │   │   ├── safety.py         # 内容安全审查（PII 预编译 + 敏感词）
 │   │   └── send.py           # 发送（WBI 签名修复 + DM 错误分类 + dev_id 随机化）
 │   ├── providers/            # AI Provider
-│   │   ├── manager.py        # [v3] Provider 管理 + Agent 工厂（会话级缓存）
+│   │   ├── manager.py        # Provider 管理 + Agent 会话（裁剪LLM摘要+持久化）
 │   ├── tools/                # PydanticAI Tool 工具系统
 │   │   ├── __init__.py       # Tool 定义 + 实现（线程安全锁）
 │   │   ├── transcribe.py     # Whisper 语音转录（yt-dlp + faster-whisper）
@@ -361,7 +357,7 @@ GenerateStage → ProviderManager.chat(session_key, user_message)
 Agent（按会话缓存）
     ├─ session_key = "msgfeed:{oid}:{mid}"  → 取已有 Agent + 历史
     ├─ agent.run_sync(user_prompt, message_history=session.history)
-    ├─ 历史裁剪（>40条 → LLM摘要 + 保留20条）
+    ├─ 历史裁剪（>50条 → LLM摘要 + 保留30条）
     └─ result.output → ReplyResult(text=..., tool_calls=[...])
         │
         ├─ 成功 → 返回回复
@@ -380,11 +376,12 @@ def search_web(query: str) -> str: ...
     # Tavily → 配额耗尽/失败 → DuckDuckGo → 失败 → 错误提示
 ```
 
-**PydanticAI Agent 原生集成**（v3）：
+**PydanticAI Agent 原生集成**（v4）：
 - `ProviderManager.chat(session_key, user_message)` 按会话管理 Agent 实例
 - DM 会话 key=`dm:{talker_id}`，评论 key=`{source}:{oid}:{mid}`
-- Agent 内部维护完整对话历史，超限自动 LLM 摘要压缩
-- 会话 TTL=1h，超期自动回收
+- Agent 内部维护完整对话历史，裁剪>50条时 LLM 详细摘要
+- 会话过期(>1h)自动摘要并持久化到磁盘，重启恢复
+- TTL/裁剪阈值可在 config.toml 的 `[ai]` 段配置
 
 ### 事件模型
 
