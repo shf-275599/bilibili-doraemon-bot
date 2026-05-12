@@ -26,7 +26,7 @@ logger = structlog.get_logger()
 
 SESSION_TTL = 3600
 MAX_SESSIONS = 500
-HISTORY_MAX = 40
+HISTORY_MAX = 50
 
 
 class ProviderManager:
@@ -66,7 +66,7 @@ class ProviderManager:
                 message_history=session.history,
             )
             session.history = result.all_messages()
-            logger.debug("chat_done", key=session_key, history_len=len(session.history))
+            self._trim_history(session)
             return _agent_result_to_reply(result, self.primary_name)
         except Exception as e:
             logger.warning("agent_chat_failed", error=str(e), session=session_key)
@@ -100,6 +100,13 @@ class ProviderManager:
         ]
         for k in expired:
             del self._sessions[k]
+
+    def _trim_history(self, session: _AgentSession) -> None:
+        """超过上限时保留第1条(system)和最近30条，简单截断不破坏消息格式。"""
+        if len(session.history) <= HISTORY_MAX:
+            return
+        keep = 30
+        session.history = [session.history[0]] + session.history[-keep:]
 
     def generate_reply(self, messages: list[dict[str, str]]) -> ReplyResult:
         return self.primary.generate(messages)
