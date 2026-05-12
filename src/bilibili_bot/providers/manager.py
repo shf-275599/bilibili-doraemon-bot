@@ -1,8 +1,6 @@
 """AI Provider 管理 — 基于 PydanticAI Agent 的会话级对话管理。
 
-每个会话（DM: talker_id，评论: video_id:user_id）维护独立的 Agent 实例，
-Agent 内部自动管理对话历史，支持多轮上下文。
-历史超限时自动 LLM 摘要压缩。
+每个会话维护独立 Agent 实例，Agent 通过 message_history 自动管理上下文。
 """
 
 from __future__ import annotations
@@ -59,18 +57,16 @@ class ProviderManager:
         session = self._get_or_create_session(session_key, system_prompt, use_tools)
         session.touch()
 
-        try:
-            # 将最近3轮对话作为上下文提示追加到用户消息
-            context_hint = _build_context_hint(session.history)
-            if context_hint:
-                user_message = f"{user_message}\n\n[最近对话: {context_hint}]"
+        n_hist = len(session.history)
+        logger.debug("chat_start", key=session_key, history_len=n_hist)
 
+        try:
             result = session.agent.run_sync(
                 user_prompt=user_message,
                 message_history=session.history,
             )
             session.history = result.all_messages()
-            self._trim_history(session)
+            logger.debug("chat_done", key=session_key, history_len=len(session.history))
             return _agent_result_to_reply(result, self.primary_name)
         except Exception as e:
             logger.warning("agent_chat_failed", error=str(e), session=session_key)
@@ -88,13 +84,7 @@ class ProviderManager:
 
         agent = _create_pydantic_agent(
             system_prompt, self._config, self.primary_name
-        ) if use_tools else None
-
-        if not use_tools or agent is None:
-            agent = _create_pydantic_agent(
-                system_prompt, self._config, self.primary_name
-            )
-
+        )
         session = _AgentSession(agent=agent, created_at=time.time())
         if len(self._sessions) >= MAX_SESSIONS:
             oldest = min(self._sessions, key=lambda k: self._sessions[k].last_used)
@@ -111,59 +101,7 @@ class ProviderManager:
         for k in expired:
             del self._sessions[k]
 
-    def _trim_history(self, session: _AgentSession) -> None:
-        """历史超限时用 LLM 摘要压缩旧消息。"""
-        if len(session.history) <= HISTORY_MAX:
-            return
-
-        keep = 25
-        old_msgs = session.history[1:-keep]  # 跳过 system_prompt，保留最近 keep 条
-        if len(old_msgs) <= 1:
-            return
-
-        summary = self._summarize_messages(old_msgs)
-        if not summary:
-            session.history = [session.history[0]] + session.history[-keep:]
-            return
-
-        summary_msg = ModelRequest(parts=[
-            SystemPromptPart(content=f"[对话历史摘要] {summary}")
-        ])
-        session.history = [session.history[0], summary_msg] + session.history[-keep:]
-
-    def _summarize_messages(self, messages: list) -> str:
-        """调用 LLM 生成对话摘要。"""
-        lines = []
-        for msg in messages:
-            try:
-                role = "我" if hasattr(msg, 'parts') and any(
-                    'ToolCall' in type(p).__name__ for p in msg.parts
-                ) else "对方" if any(
-                    'UserPrompt' in type(p).__name__ for p in msg.parts
-                ) else ""
-                content = str(msg)
-                if role:
-                    lines.append(f"{role}: {content[:200]}")
-            except Exception:
-                lines.append(str(msg)[:200])
-
-        text = "\n".join(lines[-30:])
-        if not text.strip():
-            return ""
-
-        try:
-            result = self.primary.generate([
-                {"role": "system", "content": "用3-5句中文总结以下对话，列出每个被讨论过的话题（如GPT-5.5、恐怖片推荐、喜剧电影、天气等）和关键信息："},
-                {"role": "user", "content": text},
-            ])
-            if result.success and result.text:
-                return result.text[:500]
-        except Exception as e:
-            logger.debug("history_summary_failed", error=str(e))
-        return ""
-
     def generate_reply(self, messages: list[dict[str, str]]) -> ReplyResult:
-        """降级路径：纯 HTTP 调用（无工具，无会话）。"""
         return self.primary.generate(messages)
 
 
@@ -176,20 +114,3 @@ class _AgentSession:
 
     def touch(self) -> None:
         self.last_used = time.time()
-
-
-def _build_context_hint(history: list) -> str:
-    """从历史中提取最近对话文本，作为上下文提示。"""
-    if len(history) < 2:
-        return ""
-    parts = []
-    for msg in history[-6:]:
-        try:
-            for part in msg.parts:
-                content = getattr(part, 'content', '') or str(part)
-                if content and len(content) > 2:
-                    parts.append(content[:120])
-                    break
-        except Exception:
-            pass
-    return " | ".join(parts[-4:])
