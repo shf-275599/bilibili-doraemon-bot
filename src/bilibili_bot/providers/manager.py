@@ -6,18 +6,13 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelRequest, SystemPromptPart
 
-from bilibili_bot.providers.base import BaseProvider, ReplyResult
-from bilibili_bot.providers.openai_compat import (
-    OpenAICompatibleProvider,
-    _agent_result_to_reply,
-    _create_pydantic_agent,
-)
+from bilibili_bot.providers.agent_factory import create_agent
 
 if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage
@@ -29,23 +24,21 @@ MAX_SESSIONS = 500
 HISTORY_MAX = 50
 
 
+@dataclass
+class ReplyResult:
+    success: bool
+    text: str = ""
+    provider: str = ""
+    error: str = ""
+    retriable: bool = False
+    raw: Any = None
+    tool_calls: list[str] = field(default_factory=list)
+
+
 class ProviderManager:
     def __init__(self, config):
         self._config = config
-        providers = config.ai.providers
-        self.primary_name = config.ai.primary_provider
-        self.primary = self._build_provider(
-            self.primary_name, providers[self.primary_name]
-        )
         self._sessions: dict[str, _AgentSession] = {}
-
-    def _build_provider(self, name: str, provider_config) -> BaseProvider:
-        provider_type = provider_config.type
-        if provider_type == "openai_compatible":
-            return OpenAICompatibleProvider(
-                name, provider_config.model_dump(), self._config
-            )
-        raise ValueError(f"不支持的 provider type: {provider_type}")
 
     def chat(
         self,
@@ -54,11 +47,8 @@ class ProviderManager:
         user_message: str,
         use_tools: bool = True,
     ) -> ReplyResult:
-        session = self._get_or_create_session(session_key, system_prompt, use_tools)
+        session = self._get_or_create_session(session_key, system_prompt)
         session.touch()
-
-        n_hist = len(session.history)
-        logger.debug("chat_start", key=session_key, history_len=n_hist)
 
         try:
             result = session.agent.run_sync(
@@ -67,24 +57,19 @@ class ProviderManager:
             )
             session.history = result.all_messages()
             self._trim_history(session)
-            return _agent_result_to_reply(result, self.primary_name)
+            return _result_to_reply(result)
         except Exception as e:
             logger.warning("agent_chat_failed", error=str(e), session=session_key)
-            return self.primary.generate([
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ])
+            return ReplyResult(False, error=str(e), retriable=True)
 
     def _get_or_create_session(
-        self, key: str, system_prompt: str, use_tools: bool
+        self, key: str, system_prompt: str
     ) -> _AgentSession:
         self._prune()
         if key in self._sessions:
             return self._sessions[key]
 
-        agent = _create_pydantic_agent(
-            system_prompt, self._config, self.primary_name
-        )
+        agent = create_agent(system_prompt, self._config, self._config.ai.primary_provider)
         session = _AgentSession(agent=agent, created_at=time.time())
         if len(self._sessions) >= MAX_SESSIONS:
             oldest = min(self._sessions, key=lambda k: self._sessions[k].last_used)
@@ -94,22 +79,14 @@ class ProviderManager:
 
     def _prune(self) -> None:
         now = time.time()
-        expired = [
-            k for k, v in self._sessions.items()
-            if now - v.last_used > SESSION_TTL
-        ]
-        for k in expired:
-            del self._sessions[k]
+        for k in list(self._sessions):
+            if now - self._sessions[k].last_used > SESSION_TTL:
+                del self._sessions[k]
 
     def _trim_history(self, session: _AgentSession) -> None:
-        """超过上限时保留第1条(system)和最近30条，简单截断不破坏消息格式。"""
         if len(session.history) <= HISTORY_MAX:
             return
-        keep = 30
-        session.history = [session.history[0]] + session.history[-keep:]
-
-    def generate_reply(self, messages: list[dict[str, str]]) -> ReplyResult:
-        return self.primary.generate(messages)
+        session.history = [session.history[0]] + session.history[-30:]
 
 
 class _AgentSession:
@@ -121,3 +98,22 @@ class _AgentSession:
 
     def touch(self) -> None:
         self.last_used = time.time()
+
+
+def _result_to_reply(result) -> ReplyResult:
+    tool_calls: list[str] = []
+    try:
+        for msg in result.all_messages():
+            for part in msg.parts:
+                name = getattr(part, "tool_name", "") or ""
+                if name and name not in tool_calls:
+                    tool_calls.append(name)
+    except Exception:
+        pass
+
+    return ReplyResult(
+        success=True,
+        text=str(result.output),
+        provider="deepseek",
+        tool_calls=tool_calls,
+    )
