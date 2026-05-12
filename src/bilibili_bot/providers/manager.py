@@ -200,27 +200,17 @@ def _result_to_reply(result) -> ReplyResult:
 
 
 def _chat_simple(config, system_prompt: str, user_message: str) -> ReplyResult:
-    """纯 HTTP 调用（无 Agent，用于摘要等轻量任务）。"""
-    import os, requests
+    """纯 PydanticAI 单轮调用（无 tools，用于摘要等轻量任务）。"""
     cfg = config.ai.providers[config.ai.primary_provider]
     api_key = os.environ.get(cfg.api_key_env or "", "")
+    p = OpenAIProvider(base_url=(cfg.base_url or "").rstrip("/"), api_key=api_key)
+    model = OpenAIChatModel(cfg.model or "", provider=p)
+    agent = Agent(model, system_prompt=system_prompt)
     try:
-        resp = requests.post(
-            f"{cfg.base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "model": cfg.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                "temperature": config.reply.temperature,
-                "max_tokens": 200,
-            },
-            timeout=15,
+        result = agent.run_sync(
+            user_message,
+            model_settings=ModelSettings(temperature=config.reply.temperature, max_tokens=200),
         )
-        data = resp.json()
-        text = data["choices"][0]["message"]["content"].strip()
-        return ReplyResult(True, text=text, provider="deepseek")
+        return ReplyResult(True, text=str(result.output), provider="deepseek")
     except Exception as e:
         return ReplyResult(False, error=str(e))
