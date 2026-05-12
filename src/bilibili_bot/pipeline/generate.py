@@ -95,7 +95,6 @@ class AIGenerateStage(PipelineStage):
             session_key=session_key,
             system_prompt=system_prompt,
             user_message=user_message,
-            use_tools=use_tools,
         )
 
         if not reply.success:

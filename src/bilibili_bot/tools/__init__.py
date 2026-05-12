@@ -128,17 +128,8 @@ def _search_web(query: str) -> str:
     if not query:
         return "错误：未提供搜索关键词"
     try:
-        from bilibili_bot.config import BotConfig
         from bilibili_bot.tools.web_search import web_search
-
-        limit = 30
-        try:
-            config = BotConfig.from_toml("config/bot-config.toml")
-            limit = config.ai.search_quota_daily
-        except Exception:
-            pass
-
-        return web_search(query, daily_limit=limit)
+        return web_search(query, daily_limit=30)
     except ImportError:
         return "搜索功能不可用"
 
