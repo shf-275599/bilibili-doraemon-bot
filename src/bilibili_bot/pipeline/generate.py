@@ -15,12 +15,12 @@ def summarize_conversation(summary_text: str, provider) -> str:
     """调用 LLM 生成对话摘要，失败时返回空字符串。"""
     try:
         messages = [
-            {"role": "system", "content": "你是一个对话摘要助手。用一句中文简洁总结以下对话的内容和当前话题。"},
+            {"role": "system", "content": "你是一个对话摘要助手。用2-3句中文简洁总结以下对话的核心内容、用户关注的话题、以及你的回复方向。"},
             {"role": "user", "content": f"对话历史:\n{summary_text}"},
         ]
         result = provider.generate(messages)
         if result.success and result.text:
-            return result.text[:100]
+            return result.text[:300]
     except Exception as e:
         logger.warning("summarize_failed", error=str(e))
     return ""
@@ -101,18 +101,20 @@ def build_dm_messages(event: DMEvent, config) -> list[dict[str, str]]:
         {"role": "system", "content": config.reply.system_prompt},
     ]
 
-    if event.conversation_summary:
-        messages.append({"role": "system", "content": f"对话背景摘要：{event.conversation_summary}"})
+    has_summary = bool(event.conversation_summary)
 
     if event.recent_messages:
         for hist in event.recent_messages[-15:]:
             messages.append({"role": "user" if hist["role"] == "user" else "assistant", "content": hist["content"]})
 
     now = datetime.now(CST)
-    messages.append({
-        "role": "user",
-        "content": f"当前时间：{now.strftime('%Y年%m月%d日 %H:%M')}\n用户 {event.talker_name} 发来最新私信：{event.content}",
-    })
+    current_content = f"当前时间：{now.strftime('%Y年%m月%d日 %H:%M')}\n用户 {event.talker_name} 发来最新私信：{event.content}"
+
+    # 当有摘要但最近消息中可能缺少上下文时，追加提示
+    if has_summary:
+        current_content += f"\n\n（你和他之前的对话摘要：{event.conversation_summary}。如果他的消息看起来在延续之前的话题，请结合摘要理解他的意图。）"
+
+    messages.append({"role": "user", "content": current_content})
 
     return messages
 
