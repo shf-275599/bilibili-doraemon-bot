@@ -66,7 +66,8 @@ def _build_dm_prompt(event: DMEvent) -> str:
     now = datetime.now(CST)
     return (
         f"时间：{now.strftime('%m月%d日 %H:%M')}\n"
-        f"{event.talker_name} 发来私信：{event.content}"
+        f"{event.talker_name} 发来私信：{event.content}\n"
+        f"（注意：回复必须用纯文字，像发微信一样自然说话，不要用任何格式化符号）"
     )
 
 
