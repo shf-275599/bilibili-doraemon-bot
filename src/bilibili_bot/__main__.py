@@ -257,6 +257,25 @@ def run_once(config: BotConfig, dry_run: bool = False,
             pass
         state["last_compact_check"] = int(now)
 
+    # 定期同步关注者列表（30分钟一次）
+    follower_sync_interval = 1800
+    last_follower_sync = state.get("last_follower_sync", 0)
+    if config.filters.followed_only and now - last_follower_sync >= follower_sync_interval:
+        try:
+            my_uid = client.get_cookie("DedeUserID", "")
+            if my_uid:
+                resp = client.get(f"https://api.bilibili.com/x/relation/followers?vmid={my_uid}")
+                data = resp.json()
+                if data.get("code") == 0:
+                    followers = {}
+                    for f in data.get("data", {}).get("list", []):
+                        followers[str(f.get("mid"))] = f.get("uname", "")
+                    state["followers"] = followers
+                    state["last_follower_sync"] = int(now)
+                    logger.info("followers_synced", count=len(followers))
+        except Exception as e:
+            logger.debug("follower_sync_failed", error=str(e))
+
     atomic_store.save_state(state)
 
 

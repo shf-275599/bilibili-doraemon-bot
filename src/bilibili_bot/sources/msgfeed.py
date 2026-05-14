@@ -273,30 +273,19 @@ class MsgFeedReplySource(BaseSource):
         mids = {e.author_mid for e in events if e.author_mid}
         if not mids:
             return
-        import random, time
-        for mid in mids:
-            try:
-                time.sleep(random.uniform(0.3, 1.0))
-                params = client.sign_wbi({"mid": mid})
-                resp = client.get(
-                    "https://api.bilibili.com/x/space/wbi/acc/info",
-                    params=params,
-                )
-                data = resp.json()
-                if data.get("code") == 0:
-                    info = data.get("data", {})
-                    relation = info.get("relation", {})
-                    attr = relation.get("attribute", 0)
-                    level = info.get("level", 0)
-                    fans_count = info.get("follower", 0)
-                    for e in events:
-                        if e.author_mid == mid:
-                            if attr in (2, 6):
-                                e.author_follower = True
-                            e.author_level = level
-                            e.author_fans_count = fans_count
-            except Exception as e:
-                logger.debug("user_enrich_failed", mid=mid, error=str(e))
+        # 从 bot-state.json 读取已同步的关注者列表
+        from bilibili_bot.atomic_state import AtomicStateStore
+        store = AtomicStateStore()
+        state = store.load_state()
+        followers = state.get("followers", {})
+        
+        for e in events:
+            if not e.author_mid:
+                continue
+            if e.author_mid in followers:
+                e.author_follower = True
+            else:
+                e.author_follower = False
                 # 失败不阻塞
                 for ev in events:
                     if ev.author_mid == mid:
