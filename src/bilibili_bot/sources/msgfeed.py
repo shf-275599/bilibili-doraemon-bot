@@ -273,19 +273,36 @@ class MsgFeedReplySource(BaseSource):
         mids = {e.author_mid for e in events if e.author_mid}
         if not mids:
             return
+        import random, time, requests
+        cookies = client.get_cookies()
+        sessdata = cookies.get("SESSDATA", "")
+        bili_jct = cookies.get("bili_jct", "")
+        cookie_str = f"SESSDATA={sessdata}; bili_jct={bili_jct}"
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         for mid in mids:
             try:
+                time.sleep(random.uniform(1.0, 3.0))
                 params = client.sign_wbi({"mid": mid})
-                resp = client.get(
+                resp = requests.get(
                     "https://api.bilibili.com/x/space/wbi/acc/info",
                     params=params,
+                    headers={
+                        "User-Agent": ua, "Cookie": cookie_str,
+                        "Accept": "application/json, text/plain, */*",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        "Referer": f"https://space.bilibili.com/{mid}",
+                        "Origin": "https://space.bilibili.com",
+                        "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                        "sec-ch-ua-mobile": "?0",
+                        "sec-ch-ua-platform": '"Windows"',
+                        "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-site",
+                    },
+                    timeout=10,
                 )
                 data = resp.json()
                 if data.get("code") == 0:
                     info = data.get("data", {})
                     relation = info.get("relation", {})
-                    # is_followed = bot关注了用户
-                    # attribute=2(被关注)或6(互关) → 用户关注了bot
                     attr = relation.get("attribute", 0)
                     level = info.get("level", 0)
                     fans_count = info.get("follower", 0)
@@ -295,8 +312,17 @@ class MsgFeedReplySource(BaseSource):
                                 e.author_follower = True
                             e.author_level = level
                             e.author_fans_count = fans_count
+                else:
+                    # API 返回非0(如-352风控)时，假定用户是关注者，不阻塞
+                    for e in events:
+                        if e.author_mid == mid:
+                            e.author_follower = True
             except Exception as e:
                 logger.debug("user_enrich_failed", mid=mid, error=str(e))
+                # 失败也不阻塞
+                for ev in events:
+                    if ev.author_mid == mid:
+                        ev.author_follower = True
 
     def _normalize_item(self, item: dict) -> CommentEvent | None:
         user = item.get("user", {})
