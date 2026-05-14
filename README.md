@@ -141,10 +141,6 @@ cat data/bot-state.json | python3 -m json.tool  # 运行状态
 grep "send_success" <(journalctl --user -u bilibot --since 1h ago) | wc -l  # 1小时回复数
 ```
 
-## star 历史
-
-[![Star History Chart](https://api.star-history.com/svg?repos=shf-275599/bilibili-doraemon-bot&type=Date)](https://star-history.com/#shf-275599/bilibili-doraemon-bot&Date)
-
 ## License
 
 MIT
