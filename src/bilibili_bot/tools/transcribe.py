@@ -63,6 +63,8 @@ def transcribe_video(bvid: str, model_path: str, cookies_file: str) -> str:
 
     except Exception as e:
         logger.warning("transcribe_error", bvid=bvid, error=str(e))
+        global _MODEL
+        _MODEL = None
         return ""
 
 
