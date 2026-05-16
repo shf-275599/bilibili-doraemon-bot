@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
-import os
-import time
 import glob
+import os
+import subprocess
+import time
 
 import structlog
 
@@ -46,10 +46,18 @@ def transcribe_video(bvid: str, model_path: str, cookies_file: str) -> str:
         if _MODEL is None:
             logger.info("whisper_model_loading", path=model_path)
             from faster_whisper import WhisperModel
-            _MODEL = WhisperModel(model_path, device="cpu", compute_type="int8")
+            _MODEL = WhisperModel(model_path, device="cpu", compute_type="auto")
             logger.info("whisper_model_loaded")
 
-        segments, _info = _MODEL.transcribe(audio_path, beam_size=5, language="zh")
+        for attempt in range(2):
+            try:
+                segments, _info = _MODEL.transcribe(audio_path, beam_size=5, language="zh")
+                break
+            except Exception:
+                if attempt == 0:
+                    _MODEL = None
+                else:
+                    raise
         texts = [seg.text.strip() for seg in segments if seg.text.strip()]
         transcript = " ".join(texts)
 
@@ -63,7 +71,10 @@ def transcribe_video(bvid: str, model_path: str, cookies_file: str) -> str:
 
     except Exception as e:
         logger.warning("transcribe_error", bvid=bvid, error=str(e))
-        _MODEL = None
+        try:
+            _MODEL = None
+        except Exception:
+            pass
         return ""
 
 
